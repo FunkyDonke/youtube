@@ -191,7 +191,8 @@
       const activateMiniplayer = () => {
         if (!playerRect) {
             const w = 384;
-            const h = w * (9/16);
+            const headerHeight = 40;
+            const h = w * (9/16) + headerHeight;
             setPlayerRect({
                 left: window.innerWidth - w - 24,
                 top: window.innerHeight - h - 24,
@@ -256,6 +257,7 @@
             let newWidth = startWidth;
             let newLeft = startLeft;
             let newTop = startTop;
+            const headerHeight = 40;
 
             if (dir.includes('e')) newWidth = startWidth + dx;
             else if (dir.includes('w')) {
@@ -264,13 +266,15 @@
             } 
             else if (dir === 'n') {
                 const newHeight = startHeight - dy;
-                newWidth = newHeight * (16/9);
+                const videoH = newHeight - headerHeight;
+                newWidth = videoH * (16/9);
                 newTop = startTop + dy;
                 newLeft = startLeft + (startWidth - newWidth) / 2;
             } 
             else if (dir === 's') {
                 const newHeight = startHeight + dy;
-                newWidth = newHeight * (16/9);
+                const videoH = newHeight - headerHeight;
+                newWidth = videoH * (16/9);
                 newLeft = startLeft + (startWidth - newWidth) / 2;
             }
 
@@ -286,10 +290,10 @@
                 if (dir.includes('w')) newLeft += diff;
             }
 
-            const newHeight = newWidth * (9/16);
+            const newHeight = newWidth * (9/16) + headerHeight;
 
             // Fix Y axis for diagonal resizes to maintain anchor
-            if (dir.includes('n') && dir !== 'n') newTop = startTop + (startHeight - newHeight);
+            if (dir.includes('n')) newTop = startTop + (startHeight - newHeight);
 
             setPlayerRect({ left: newLeft, top: newTop, width: newWidth, height: newHeight });
           }
@@ -369,7 +373,7 @@
                   {/* The Video Container */}
                   {currentVideo && (
                     <div 
-                      className={`${isMiniplayer ? 'fixed bg-[#212121] rounded-xl shadow-2xl z-[100] border border-gray-700 flex flex-col overflow-visible visible' : 'w-full aspect-video bg-black rounded-xl overflow-hidden shadow-lg relative'}`}
+                      className={`${isMiniplayer ? 'fixed z-[100] flex flex-col overflow-visible visible' : 'w-full aspect-video relative'}`}
                       style={isMiniplayer && playerRect ? {
                         left: `${playerRect.left}px`,
                         top: `${playerRect.top}px`,
@@ -377,23 +381,13 @@
                         height: `${playerRect.height}px`,
                       } : {}}
                     >
-                      {/* 8-Way Resize Handles */}
-                      {isMiniplayer && (
-                        <>
-                          <div className="absolute -top-2 left-2 right-2 h-4 cursor-n-resize z-20" onMouseDown={(e) => handleResizeStart(e, 'n')} onTouchStart={(e) => handleResizeStart(e, 'n')} />
-                          <div className="absolute -bottom-2 left-2 right-2 h-4 cursor-s-resize z-20" onMouseDown={(e) => handleResizeStart(e, 's')} onTouchStart={(e) => handleResizeStart(e, 's')} />
-                          <div className="absolute top-2 bottom-2 -left-2 w-4 cursor-w-resize z-20" onMouseDown={(e) => handleResizeStart(e, 'w')} onTouchStart={(e) => handleResizeStart(e, 'w')} />
-                          <div className="absolute top-2 bottom-2 -right-2 w-4 cursor-e-resize z-20" onMouseDown={(e) => handleResizeStart(e, 'e')} onTouchStart={(e) => handleResizeStart(e, 'e')} />
-                          <div className="absolute -top-2 -left-2 w-6 h-6 cursor-nw-resize z-30" onMouseDown={(e) => handleResizeStart(e, 'nw')} onTouchStart={(e) => handleResizeStart(e, 'nw')} />
-                          <div className="absolute -top-2 -right-2 w-6 h-6 cursor-ne-resize z-30" onMouseDown={(e) => handleResizeStart(e, 'ne')} onTouchStart={(e) => handleResizeStart(e, 'ne')} />
-                          <div className="absolute -bottom-2 -left-2 w-6 h-6 cursor-sw-resize z-30" onMouseDown={(e) => handleResizeStart(e, 'sw')} onTouchStart={(e) => handleResizeStart(e, 'sw')} />
-                          <div className="absolute -bottom-2 -right-2 w-6 h-6 cursor-se-resize z-30" onMouseDown={(e) => handleResizeStart(e, 'se')} onTouchStart={(e) => handleResizeStart(e, 'se')} />
-                        </>
-                      )}
-
-                      {/* Miniplayer Drag Header */}
-                      {isMiniplayer && (
-                        <div className="absolute -top-10 left-0 right-0 h-10 flex justify-between items-center px-3 bg-[#181818] rounded-t-xl cursor-move select-none z-10 shadow-md border border-gray-700" onMouseDown={handleDragStart} onTouchStart={handleDragStart}>
+                      <div className={`w-full h-full flex flex-col relative rounded-xl overflow-hidden ${isMiniplayer ? 'bg-[#212121] shadow-2xl border border-gray-700' : 'bg-black shadow-lg'}`}>
+                        {/* Miniplayer Drag Header - Always in DOM but visually toggled */}
+                        <div 
+                          className={`${isMiniplayer ? 'flex' : 'hidden'} h-10 flex-shrink-0 justify-between items-center px-3 bg-[#181818] cursor-move select-none z-10 border-b border-gray-700`} 
+                          onMouseDown={handleDragStart} 
+                          onTouchStart={handleDragStart}
+                        >
                           <div className="flex flex-col truncate pr-2 w-[75%]">
                             <span className="text-sm font-bold truncate text-white">{currentVideo.title}</span>
                           </div>
@@ -406,13 +400,27 @@
                             </button>
                           </div>
                         </div>
-                      )}
 
-                      {/* Wrapper for the YouTube API Injection */}
-                      <div className="w-full h-full relative bg-black pointer-events-auto overflow-hidden rounded-xl">
-                        {(isDragging || resizeState.active) && <div className="absolute inset-0 z-10 bg-transparent"></div>}
-                        <div id="yt-player-wrapper" className="w-full h-full"></div>
+                        {/* Wrapper for the YouTube API Injection */}
+                        <div className="w-full flex-1 relative bg-black pointer-events-auto overflow-hidden">
+                          {(isDragging || resizeState.active) && <div className="absolute inset-0 z-10 bg-transparent"></div>}
+                          <div id="yt-player-wrapper" className="w-full h-full"></div>
+                        </div>
                       </div>
+
+                      {/* 8-Way Resize Handles - Placed on the absolute edges of the entire card */}
+                      {isMiniplayer && (
+                        <>
+                          <div className="absolute -top-2 left-2 right-2 h-4 cursor-n-resize z-20" onMouseDown={(e) => handleResizeStart(e, 'n')} onTouchStart={(e) => handleResizeStart(e, 'n')} />
+                          <div className="absolute -bottom-2 left-2 right-2 h-4 cursor-s-resize z-20" onMouseDown={(e) => handleResizeStart(e, 's')} onTouchStart={(e) => handleResizeStart(e, 's')} />
+                          <div className="absolute top-2 bottom-2 -left-2 w-4 cursor-w-resize z-20" onMouseDown={(e) => handleResizeStart(e, 'w')} onTouchStart={(e) => handleResizeStart(e, 'w')} />
+                          <div className="absolute top-2 bottom-2 -right-2 w-4 cursor-e-resize z-20" onMouseDown={(e) => handleResizeStart(e, 'e')} onTouchStart={(e) => handleResizeStart(e, 'e')} />
+                          <div className="absolute -top-2 -left-2 w-6 h-6 cursor-nw-resize z-30" onMouseDown={(e) => handleResizeStart(e, 'nw')} onTouchStart={(e) => handleResizeStart(e, 'nw')} />
+                          <div className="absolute -top-2 -right-2 w-6 h-6 cursor-ne-resize z-30" onMouseDown={(e) => handleResizeStart(e, 'ne')} onTouchStart={(e) => handleResizeStart(e, 'ne')} />
+                          <div className="absolute -bottom-2 -left-2 w-6 h-6 cursor-sw-resize z-30" onMouseDown={(e) => handleResizeStart(e, 'sw')} onTouchStart={(e) => handleResizeStart(e, 'sw')} />
+                          <div className="absolute -bottom-2 -right-2 w-6 h-6 cursor-se-resize z-30" onMouseDown={(e) => handleResizeStart(e, 'se')} onTouchStart={(e) => handleResizeStart(e, 'se')} />
+                        </>
+                      )}
                     </div>
                   )}
 
