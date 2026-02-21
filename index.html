@@ -195,6 +195,9 @@
         const currentTimes = JSON.parse(localStorage.getItem('ytCloneTimes') || '{}');
         const startSeconds = currentTimes[currentVideo.id] || 0;
 
+        const savedIndexes = JSON.parse(localStorage.getItem('ytClonePlaylistIndexes') || '{}');
+        const startIndex = savedIndexes[currentVideo.id] || 0;
+
         const isPlaylist = currentVideo.type === 'playlist';
         const isLocalPlaylist = currentVideo.type === 'local_playlist';
         
@@ -203,8 +206,10 @@
         if (isPlaylist) {
             playerVars.listType = 'playlist';
             playerVars.list = currentVideo.listId;
+            playerVars.index = startIndex;
         } else if (isLocalPlaylist) {
             playerVars.playlist = currentVideo.videoIds.slice(1).join(',');
+            playerVars.index = startIndex;
         }
 
         if (!playerRef.current) {
@@ -227,40 +232,62 @@
                                     const queue = e.target.getPlaylist();
                                     if (queue && queue.length > 0) {
                                         setPlaylistQueue(queue);
-                                        setCurrentPlaylistIndex(e.target.getPlaylistIndex() || 0);
+                                        const idx = e.target.getPlaylistIndex();
+                                        if (idx !== null && idx !== undefined) {
+                                            setCurrentPlaylistIndex(idx);
+                                        }
+                                        
+                                        // FIX 1: প্রথম ভিডিওর থাম্বনেইল প্লেলিস্টের মূল থাম্বনেইল হিসেবে সেট করা
+                                        setVideos(prev => {
+                                            let changed = false;
+                                            const updated = prev.map(v => {
+                                                if (v.id === currentVideo.id && v.thumbnail.includes('placehold.co')) {
+                                                    changed = true;
+                                                    return { ...v, thumbnail: `https://img.youtube.com/vi/${queue[0]}/hqdefault.jpg` };
+                                                }
+                                                return v;
+                                            });
+                                            if (changed) localStorage.setItem('ytCloneVideos', JSON.stringify(updated));
+                                            return changed ? updated : prev;
+                                        });
                                     }
                                 }
                             }
 
                             if (e.data === window.YT.PlayerState.PLAYING) {
-                                // AUTO TITLE & THUMBNAIL FETCH LOGIC FOR MAIN VIDEO
-                                const vData = e.target.getVideoData();
-                                const actualVideoId = vData?.video_id;
-
-                                if (vData && (vData.title || actualVideoId)) {
-                                    setVideos(prev => {
-                                        let changed = false;
-                                        const updated = prev.map(v => {
-                                            if (v.id === currentVideo.id) {
-                                                let newTitle = v.title;
-                                                let newThumbnail = v.thumbnail;
-
-                                                if (vData.title && (v.title === 'YouTube Video' || v.title === 'YouTube Playlist' || v.title === 'Custom Video' || v.title === '')) {
-                                                    newTitle = vData.title;
+                                // FIX 2: প্লেলিস্টের সঠিক ইনডেক্স শুধুমাত্র PLAYING স্টেটেই সেভ করা (Off-by-one ফিক্স)
+                                if (currentVideo.type.includes('playlist')) {
+                                    const currentIdx = e.target.getPlaylistIndex();
+                                    if (currentIdx !== null && currentIdx !== undefined) {
+                                        const indexes = JSON.parse(localStorage.getItem('ytClonePlaylistIndexes') || '{}');
+                                        
+                                        if (indexes[currentVideo.id] !== currentIdx) {
+                                            indexes[currentVideo.id] = currentIdx;
+                                            localStorage.setItem('ytClonePlaylistIndexes', JSON.stringify(indexes));
+                                            
+                                            // ভিডিও পরিবর্তন হলে আগের সেভ করা সময় (Watch Time) জিরো করে দেওয়া
+                                            const times = JSON.parse(localStorage.getItem('ytCloneTimes') || '{}');
+                                            times[currentVideo.id] = 0;
+                                            localStorage.setItem('ytCloneTimes', JSON.stringify(times));
+                                        }
+                                    }
+                                } else {
+                                    // AUTO TITLE FETCH LOGIC FOR MAIN VIDEO (Only for singles)
+                                    const vData = e.target.getVideoData();
+                                    if (vData && vData.title) {
+                                        setVideos(prev => {
+                                            let changed = false;
+                                            const updated = prev.map(v => {
+                                                if (v.id === currentVideo.id && (v.title === 'YouTube Video' || v.title === 'Custom Video' || v.title === '')) {
                                                     changed = true;
+                                                    return { ...v, title: vData.title };
                                                 }
-                                                // Update playlist thumbnail using first video ID if missing
-                                                if (actualVideoId && v.thumbnail.includes('placehold.co')) {
-                                                    newThumbnail = `https://img.youtube.com/vi/${actualVideoId}/hqdefault.jpg`;
-                                                    changed = true;
-                                                }
-                                                if(changed) return { ...v, title: newTitle, thumbnail: newThumbnail };
-                                            }
-                                            return v;
+                                                return v;
+                                            });
+                                            if(changed) localStorage.setItem('ytCloneVideos', JSON.stringify(updated));
+                                            return changed ? updated : prev;
                                         });
-                                        if(changed) localStorage.setItem('ytCloneVideos', JSON.stringify(updated));
-                                        return changed ? updated : prev;
-                                    });
+                                    }
                                 }
 
                                 timeIntervalRef.current = setInterval(() => {
@@ -280,9 +307,9 @@
             }
         } else {
             if (isPlaylist) {
-                playerRef.current.loadPlaylist({ list: currentVideo.listId, listType: 'playlist', index: 0, startSeconds });
+                playerRef.current.loadPlaylist({ list: currentVideo.listId, listType: 'playlist', index: startIndex, startSeconds });
             } else if (isLocalPlaylist) {
-                playerRef.current.loadPlaylist({ playlist: currentVideo.videoIds, index: 0, startSeconds });
+                playerRef.current.loadPlaylist({ playlist: currentVideo.videoIds, index: startIndex, startSeconds });
             } else {
                 playerRef.current.loadVideoById({ videoId: currentVideo.videoId, startSeconds });
             }
@@ -383,6 +410,30 @@
       };
 
       const filteredVideos = videos.filter(video => video.title.toLowerCase().includes(searchQuery.toLowerCase()) || video.channel.toLowerCase().includes(searchQuery.toLowerCase()));
+
+      // DYNAMIC TITLE LOGIC FOR PLAYLISTS
+      let displayTitle = currentVideoData?.title || '';
+      let displayChannel = currentVideoData?.channel || '';
+      let displayAvatar = currentVideoData?.channelAvatar || '';
+
+      if (currentVideoData?.type?.includes('playlist') && playlistQueue.length > 0) {
+          const activeVidId = playlistQueue[currentPlaylistIndex];
+          const localVidInfo = videos.find(v => v.videoId === activeVidId);
+          const meta = fetchedMeta[activeVidId];
+
+          if (localVidInfo) {
+              displayTitle = localVidInfo.title;
+              displayChannel = localVidInfo.channel;
+              displayAvatar = localVidInfo.channelAvatar;
+          } else if (meta && meta.title) {
+              displayTitle = meta.title;
+              displayChannel = meta.channel;
+          } else if (meta && meta.loading) {
+              displayTitle = 'লোড হচ্ছে...';
+          } else {
+              displayTitle = `ভিডিও ${currentPlaylistIndex + 1}`;
+          }
+      }
 
       const handleDragStart = (e) => {
         if (e.target.closest('button')) return;
@@ -507,8 +558,8 @@
                         <div className={`${isMiniplayer ? 'flex' : 'hidden'} h-10 flex-shrink-0 justify-between items-center px-3 bg-[#181818] cursor-move select-none z-10 border-b border-gray-700`} onMouseDown={handleDragStart} onTouchStart={handleDragStart}>
                           <div className="flex flex-col truncate pr-2 w-[75%]">
                             <span className="text-sm font-bold truncate text-white">
-                                {currentVideoData?.type?.includes('playlist') && <i className="fas fa-list mr-2 text-gray-400"></i>}
-                                {currentVideoData?.title}
+                                {currentVideoData?.type?.includes('playlist') && <i className="fas fa-play mr-2 text-gray-400 text-[10px]"></i>}
+                                {displayTitle}
                             </span>
                           </div>
                           <div className="flex gap-4 text-gray-400 items-center">
@@ -540,15 +591,19 @@
                   )}
 
                   <div className={`${isMiniplayer ? 'hidden' : 'block'}`}>
-                    <h1 className="text-xl md:text-2xl font-bold mt-4 mb-2">
-                        {currentVideoData?.type?.includes('playlist') && <span className="bg-white/10 text-xs px-2 py-1 rounded mr-2 align-middle border border-white/20">প্লেলিস্ট</span>}
-                        {currentVideoData?.title}
+                    <h1 className="text-xl md:text-2xl font-bold mt-4 mb-1">
+                        {displayTitle}
                     </h1>
+                    {currentVideoData?.type?.includes('playlist') && (
+                        <p className="text-sm text-gray-400 mb-3 flex items-center gap-2">
+                            <i className="fas fa-list"></i> {currentVideoData.title}
+                        </p>
+                    )}
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                       <div className="flex items-center gap-3">
-                        <img src={currentVideoData?.channelAvatar} alt={currentVideoData?.channel} className="w-10 h-10 rounded-full" />
+                        <img src={displayAvatar || 'https://ui-avatars.com/api/?name=User&background=random'} alt={displayChannel} className="w-10 h-10 rounded-full" />
                         <div>
-                          <h3 className="font-bold text-sm">{currentVideoData?.channel}</h3>
+                          <h3 className="font-bold text-sm">{displayChannel}</h3>
                           <p className="text-xs text-gray-400">সাবস্ক্রাইবার অজানা</p>
                         </div>
                         <button className="bg-white text-black px-4 py-2 rounded-full font-bold ml-2 hover:bg-gray-200 transition">সাবস্ক্রাইব</button>
