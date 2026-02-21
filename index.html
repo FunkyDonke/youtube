@@ -59,9 +59,10 @@
       }
     ];
 
-    function parseYouTubeInput(input) {
+    function parseMediaInput(input) {
       let videoId = null;
       let listId = null;
+      let driveId = null;
       let title = '';
       let urlStr = input.replace(/&amp;/g, '&');
 
@@ -73,6 +74,13 @@
       if(title.toLowerCase() === 'youtube video player' || title.toLowerCase() === 'custom video') title = ''; 
 
       try {
+        // Google Drive Detection
+        if (urlStr.includes('drive.google.com')) {
+            const driveMatch = urlStr.match(/\/d\/([a-zA-Z0-9_-]+)/);
+            if (driveMatch) driveId = driveMatch[1];
+            return { videoId, listId, driveId, title };
+        }
+
         if (!urlStr.startsWith('http') && !urlStr.startsWith('//')) urlStr = 'https://' + urlStr;
         else if (urlStr.startsWith('//')) urlStr = 'https:' + urlStr;
         
@@ -90,7 +98,7 @@
       } catch (e) {
         console.error("URL Error", e);
       }
-      return { videoId, listId, title };
+      return { videoId, listId, driveId, title };
     }
 
     function App() {
@@ -130,6 +138,9 @@
       const [ytReady, setYtReady] = useState(window.ytApiLoaded);
       const playerRef = useRef(null);
       const timeIntervalRef = useRef(null);
+      
+      // নতুন অটো-প্লে স্টেট (যাতে শুরুতে নিজে নিজে প্লে না হয়)
+      const [autoPlay, setAutoPlay] = useState(false); 
 
       const currentVideoData = currentVideo ? (videos.find(v => v.id === currentVideo.id) || currentVideo) : null;
 
@@ -137,7 +148,18 @@
         const savedHistory = localStorage.getItem('ytCloneHistory');
         const savedLastWatched = localStorage.getItem('ytCloneLastWatched');
         if (savedHistory) setWatchHistory(JSON.parse(savedHistory));
-        if (savedLastWatched) setLastWatched(JSON.parse(savedLastWatched));
+        if (savedLastWatched) {
+            const parsed = JSON.parse(savedLastWatched);
+            setLastWatched(parsed);
+            
+            // শুরুতে লাস্ট ভিডিওটি মিনিপ্লেয়ারে লোড করার লজিক
+            setCurrentVideo(parsed);
+            const w = 384;
+            const h = w * (9/16) + 40;
+            setPlayerRect({ left: window.innerWidth - w - 24, top: window.innerHeight - h - 24, width: w, height: h });
+            setIsMiniplayer(true);
+            setAutoPlay(false); // শুরুতে অটো-প্লে বন্ধ থাকবে
+        }
 
         const handleReady = () => setYtReady(true);
         window.addEventListener('yt-api-ready', handleReady);
@@ -174,7 +196,8 @@
       useEffect(() => {
         if (!ytReady) return;
         
-        if (!currentVideo) {
+        // Disable YouTube logic for Google Drive videos
+        if (!currentVideo || currentVideo.provider === 'gdrive' || currentVideo.driveId) {
             if (playerRef.current) {
                 playerRef.current.destroy();
                 playerRef.current = null;
@@ -191,8 +214,8 @@
         const isPlaylist = currentVideo.type === 'playlist';
         const isLocalPlaylist = currentVideo.type === 'local_playlist';
         
-        // এখানে playerVars থেকে listType এবং index বাদ দিয়েছি যাতে ভুল ইনডেক্স লোড না হয়
-        let playerVars = { autoplay: 1, start: startSeconds, enablejsapi: 1, playsinline: 1 };
+        // playerVars এ autoPlay স্টেট যুক্ত করা হলো
+        let playerVars = { autoplay: autoPlay ? 1 : 0, start: startSeconds, enablejsapi: 1, playsinline: 1 };
 
         if (!playerRef.current) {
             const wrapper = document.getElementById('yt-player-wrapper');
@@ -207,13 +230,15 @@
                     playerVars: playerVars,
                     events: {
                         onReady: (e) => { 
-                            // onReady তে force করে সঠিক ইনডেক্স লোড করানো হচ্ছে
+                            // অটো-প্লে অন থাকলে প্লে হবে, না হলে শুধু পজ (cue) হয়ে থাকবে
                             if (isPlaylist) {
-                                e.target.loadPlaylist({ list: currentVideo.listId, listType: 'playlist', index: startIndex, startSeconds: startSeconds });
+                                if (autoPlay) e.target.loadPlaylist({ list: currentVideo.listId, listType: 'playlist', index: startIndex, startSeconds: startSeconds });
+                                else e.target.cuePlaylist({ list: currentVideo.listId, listType: 'playlist', index: startIndex, startSeconds: startSeconds });
                             } else if (isLocalPlaylist) {
-                                e.target.loadPlaylist({ playlist: currentVideo.videoIds, index: startIndex, startSeconds: startSeconds });
+                                if (autoPlay) e.target.loadPlaylist({ playlist: currentVideo.videoIds, index: startIndex, startSeconds: startSeconds });
+                                else e.target.cuePlaylist({ playlist: currentVideo.videoIds, index: startIndex, startSeconds: startSeconds });
                             } else {
-                                e.target.playVideo();
+                                if (autoPlay) e.target.playVideo();
                             }
                         },
                         onStateChange: (e) => {
@@ -298,13 +323,16 @@
                 });
             }
         } else {
-            // যদি প্লেয়ার আগে থেকেই থাকে, তাহলে loadPlaylist দিয়ে একদম সঠিক জায়গায় নেওয়া
+            // প্লেয়ার আগে থেকে থাকলে
             if (isPlaylist) {
-                playerRef.current.loadPlaylist({ list: currentVideo.listId, listType: 'playlist', index: startIndex, startSeconds });
+                if (autoPlay) playerRef.current.loadPlaylist({ list: currentVideo.listId, listType: 'playlist', index: startIndex, startSeconds });
+                else playerRef.current.cuePlaylist({ list: currentVideo.listId, listType: 'playlist', index: startIndex, startSeconds });
             } else if (isLocalPlaylist) {
-                playerRef.current.loadPlaylist({ playlist: currentVideo.videoIds, index: startIndex, startSeconds });
+                if (autoPlay) playerRef.current.loadPlaylist({ playlist: currentVideo.videoIds, index: startIndex, startSeconds });
+                else playerRef.current.cuePlaylist({ playlist: currentVideo.videoIds, index: startIndex, startSeconds });
             } else {
-                playerRef.current.loadVideoById({ videoId: currentVideo.videoId, startSeconds });
+                if (autoPlay) playerRef.current.loadVideoById({ videoId: currentVideo.videoId, startSeconds });
+                else playerRef.current.cueVideoById({ videoId: currentVideo.videoId, startSeconds });
             }
         }
 
@@ -321,12 +349,16 @@
       };
 
       const playVideo = (video) => {
-        // FIX 3: যদি ইউজার হোমপেজ থেকে ঠিক বর্তমান চলমান ভিডিওটিতেই ক্লিক করে, তবে শুধু ম্যাক্সিমাইজ হবে (রিলোড হবে না)
         if (currentVideo && currentVideo.id === video.id) {
             setIsMiniplayer(false);
+            setAutoPlay(true);
+            if (playerRef.current && typeof playerRef.current.playVideo === 'function') {
+                playerRef.current.playVideo();
+            }
             return;
         }
 
+        setAutoPlay(true); // নতুন ভিডিওতে ক্লিক করলে অটো-প্লে হবে
         setCurrentVideo(video);
         setLastWatched(video);
         setIsMiniplayer(false); 
@@ -357,23 +389,27 @@
 
       const handleAddSubmit = (e) => {
         e.preventDefault();
-        const { videoId, listId, title: extractedTitle } = parseYouTubeInput(newMediaInput.link);
+        const { videoId, listId, driveId, title: extractedTitle } = parseMediaInput(newMediaInput.link);
         
-        if (!videoId && !listId) {
-            setAlertState({ isOpen: true, message: 'দয়া করে একটি সঠিক ইউটিউব লিংক বা এমবেড কোড দিন।' });
+        if (!videoId && !listId && !driveId) {
+            setAlertState({ isOpen: true, message: 'দয়া করে একটি সঠিক ইউটিউব বা গুগল ড্রাইভ লিংক/এমবেড কোড দিন।' });
             return;
         }
 
-        const id = listId ? listId : videoId;
-        const type = listId ? 'playlist' : 'video';
+        const id = driveId ? driveId : (listId ? listId : videoId);
+        const type = driveId ? 'video' : (listId ? 'playlist' : 'video');
+        const provider = driveId ? 'gdrive' : 'youtube';
         
         let finalTitle = newMediaInput.title || extractedTitle;
-        if (!finalTitle) finalTitle = type === 'playlist' ? 'YouTube Playlist' : 'YouTube Video';
+        if (!finalTitle) finalTitle = driveId ? 'Google Drive Video' : (type === 'playlist' ? 'YouTube Playlist' : 'YouTube Video');
 
-        const thumbnail = videoId ? `https://img.youtube.com/vi/${videoId}/hqdefault.jpg` : 'https://placehold.co/640x360/222222/FFFFFF/png?text=YouTube+Playlist';
+        let thumbnail = 'https://placehold.co/640x360/222222/FFFFFF/png?text=Media';
+        if (driveId) thumbnail = 'https://placehold.co/640x360/1a73e8/FFFFFF/png?text=Google+Drive+Video';
+        else if (videoId) thumbnail = `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`;
+        else if (listId) thumbnail = 'https://placehold.co/640x360/222222/FFFFFF/png?text=YouTube+Playlist';
 
         const newMedia = {
-            id: id, videoId, listId, type, title: finalTitle,
+            id: id, videoId, listId, driveId, type, provider, title: finalTitle,
             channel: newMediaInput.channel || 'Added by User', views: '0 views', thumbnail,
             channelAvatar: `https://ui-avatars.com/api/?name=${newMediaInput.channel || 'User'}&background=random`,
         };
@@ -557,6 +593,7 @@
                         <div className={`${isMiniplayer ? 'flex' : 'hidden'} h-10 flex-shrink-0 justify-between items-center px-3 bg-[#181818] cursor-move select-none z-10 border-b border-gray-700`} onMouseDown={handleDragStart} onTouchStart={handleDragStart}>
                           <div className="flex flex-col truncate pr-2 w-[75%]">
                             <span className="text-sm font-bold truncate text-white">
+                                {currentVideoData?.provider === 'gdrive' && <i className="fab fa-google-drive mr-2 text-blue-400"></i>}
                                 {currentVideoData?.type?.includes('playlist') && <i className="fas fa-play mr-2 text-gray-400 text-[10px]"></i>}
                                 {displayTitle}
                             </span>
@@ -569,7 +606,18 @@
 
                         <div className="w-full flex-1 relative bg-black pointer-events-auto overflow-hidden">
                           {(isDragging || resizeState.active) && <div className="absolute inset-0 z-10 bg-transparent"></div>}
-                          <div id="yt-player-wrapper" className="w-full h-full"></div>
+                          {/* Conditional Rendering: YouTube vs Drive */}
+                          {(!currentVideoData?.provider || currentVideoData?.provider === 'youtube') && (
+                              <div id="yt-player-wrapper" className="w-full h-full"></div>
+                          )}
+                          {currentVideoData?.provider === 'gdrive' && (
+                              <iframe 
+                                  src={`https://drive.google.com/file/d/${currentVideoData.driveId}/preview`} 
+                                  className="w-full h-full border-0" 
+                                  allow="autoplay; fullscreen"
+                                  allowFullScreen
+                              ></iframe>
+                          )}
                         </div>
                       </div>
 
@@ -590,6 +638,7 @@
 
                   <div className={`${isMiniplayer ? 'hidden' : 'block'}`}>
                     <h1 className="text-xl md:text-2xl font-bold mt-4 mb-1">
+                        {currentVideoData?.provider === 'gdrive' && <span className="bg-blue-600/20 text-blue-400 text-xs px-2 py-1 rounded mr-2 align-middle border border-blue-500/30"><i className="fab fa-google-drive"></i> Google Drive</span>}
                         {displayTitle}
                     </h1>
                     {currentVideoData?.type?.includes('playlist') && (
@@ -687,31 +736,6 @@
 
               <div className={`p-4 sm:p-6 lg:p-8 max-w-[1800px] mx-auto ${(!currentVideo || isMiniplayer) ? 'block' : 'hidden'}`}>
                 
-                {activeTab === 'home' && lastWatched && !searchQuery && (
-                  <div className="mb-8 bg-gradient-to-r from-blue-900/40 to-purple-900/40 border border-white/10 rounded-2xl p-4 flex flex-col sm:flex-row items-center justify-between gap-4 shadow-xl">
-                    <div className="flex items-center gap-4 w-full sm:w-auto">
-                      <div className="w-32 aspect-video rounded-lg overflow-hidden flex-shrink-0 relative cursor-pointer border border-white/10 bg-gray-900" onClick={() => playVideo(lastWatched)}>
-                        <img src={lastWatched.thumbnail} alt="Resume" className="w-full h-full object-cover" />
-                        <div className="absolute inset-0 bg-black/40 flex items-center justify-center hover:bg-black/20">
-                          <i className="fas fa-play-circle text-3xl text-white"></i>
-                        </div>
-                      </div>
-                      <div>
-                        <h3 className="text-sm text-blue-300 font-semibold mb-1 flex items-center gap-2">
-                          <i className="fas fa-history"></i> রিজিউম (যেখান থেকে শেষ করেছিলেন)
-                        </h3>
-                        <h4 className="font-bold line-clamp-1">{lastWatched.title}</h4>
-                        <p className="text-xs text-gray-400 mt-0.5 flex items-center gap-1">
-                          {lastWatched.type.includes('playlist') && <i className="fas fa-list"></i>} {lastWatched.type.includes('playlist') ? 'Playlist' : 'Video'}
-                        </p>
-                      </div>
-                    </div>
-                    <button onClick={() => playVideo(lastWatched)} className="bg-white text-black px-6 py-2 rounded-full font-bold hover:bg-gray-200 transition">
-                      প্লে করুন
-                    </button>
-                  </div>
-                )}
-
                 <h2 className="text-xl font-bold mb-6">
                   {activeTab === 'history' ? 'আপনার দেখার ইতিহাস' : (searchQuery ? `"${searchQuery}" এর ফলাফল` : 'প্রস্তাবিত ভিডিও ও প্লেলিস্ট')}
                 </h2>
@@ -793,8 +817,8 @@
                     </div>
                     <form onSubmit={handleAddSubmit} className="p-4 flex flex-col gap-4">
                         <div>
-                            <label className="block text-sm text-gray-400 mb-1">ইউটিউব লিংক বা এমবেড কোড (বাধ্যতামূলক)</label>
-                            <input type="text" required placeholder='যেমন: https://youtube.com/watch?v=...' className="w-full bg-[#121212] border border-gray-600 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-blue-500" value={newMediaInput.link} onChange={(e) => setNewMediaInput({...newMediaInput, link: e.target.value})} />
+                            <label className="block text-sm text-gray-400 mb-1">ইউটিউব বা গুগল ড্রাইভ লিংক/এমবেড কোড (বাধ্যতামূলক)</label>
+                            <input type="text" required placeholder='যেমন: https://youtube.com/... বা https://drive.google.com/...' className="w-full bg-[#121212] border border-gray-600 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-blue-500" value={newMediaInput.link} onChange={(e) => setNewMediaInput({...newMediaInput, link: e.target.value})} />
                         </div>
                         <div>
                             <label className="block text-sm text-gray-400 mb-1">টাইটেল (খালি রাখলে নিজে থেকেই তৈরি হবে)</label>
@@ -828,8 +852,8 @@
                         <div>
                             <label className="block text-sm text-gray-400 mb-1">ভিডিও সিলেক্ট করুন</label>
                             <div className="max-h-60 overflow-y-auto bg-[#121212] rounded-lg p-2 flex flex-col gap-1 border border-gray-600 custom-scrollbar">
-                                {videos.filter(v => v.type === 'video').length === 0 && <p className="text-center text-gray-400 py-4 text-sm">কোনো সিঙ্গেল ভিডিও নেই। আগে ভিডিও যোগ করুন!</p>}
-                                {videos.filter(v => v.type === 'video').map(v => (
+                                {videos.filter(v => v.type === 'video' && v.provider !== 'gdrive').length === 0 && <p className="text-center text-gray-400 py-4 text-sm">কোনো ইউটিউব ভিডিও নেই। আগে ভিডিও যোগ করুন!</p>}
+                                {videos.filter(v => v.type === 'video' && v.provider !== 'gdrive').map(v => (
                                     <label key={v.id} className="flex items-center gap-3 p-2 hover:bg-white/10 rounded cursor-pointer transition">
                                         <input type="checkbox" checked={selectedVideoIds.includes(v.videoId)} onChange={(e) => { if(e.target.checked) setSelectedVideoIds([...selectedVideoIds, v.videoId]); else setSelectedVideoIds(selectedVideoIds.filter(id => id !== v.videoId)); }} className="w-4 h-4 rounded border-gray-500 bg-black cursor-pointer" />
                                         <img src={v.thumbnail} className="w-12 h-8 object-cover rounded" />
