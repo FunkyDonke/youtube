@@ -109,6 +109,7 @@
       // Playlist Sidebar States
       const [playlistQueue, setPlaylistQueue] = useState([]);
       const [currentPlaylistIndex, setCurrentPlaylistIndex] = useState(0);
+      const [fetchedMeta, setFetchedMeta] = useState({}); // New state for dynamically fetched titles
 
       // Custom Alert & Confirm States
       const [alertState, setAlertState] = useState({ isOpen: false, message: '' });
@@ -142,6 +143,43 @@
         window.addEventListener('yt-api-ready', handleReady);
         return () => window.removeEventListener('yt-api-ready', handleReady);
       }, []);
+
+      // Auto-Fetch External Playlist Titles using Noembed API
+      useEffect(() => {
+        let isMounted = true;
+        
+        const fetchMissingTitles = () => {
+            playlistQueue.forEach(vidId => {
+                const existsLocally = videos.find(v => v.videoId === vidId);
+                
+                if (!existsLocally) {
+                    setFetchedMeta(prev => {
+                        if (prev[vidId]) return prev; // Already fetching or fetched
+                        
+                        // Start fetching the actual title from an open metadata API
+                        fetch(`https://noembed.com/embed?url=https://www.youtube.com/watch?v=${vidId}`)
+                            .then(res => res.json())
+                            .then(data => {
+                                if (data && data.title && isMounted) {
+                                    setFetchedMeta(current => ({
+                                        ...current,
+                                        [vidId]: { title: data.title, channel: data.author_name }
+                                    }));
+                                }
+                            }).catch(() => {});
+                            
+                        return { ...prev, [vidId]: { loading: true } };
+                    });
+                }
+            });
+        };
+
+        if (playlistQueue.length > 0) {
+            fetchMissingTitles();
+        }
+
+        return () => { isMounted = false; };
+      }, [playlistQueue, videos]);
 
       useEffect(() => {
         if (!ytReady) return;
@@ -195,7 +233,7 @@
                             }
 
                             if (e.data === window.YT.PlayerState.PLAYING) {
-                                // --- AUTO TITLE & THUMBNAIL FETCH LOGIC ---
+                                // AUTO TITLE & THUMBNAIL FETCH LOGIC FOR MAIN VIDEO
                                 const vData = e.target.getVideoData();
                                 const actualVideoId = vData?.video_id;
 
@@ -211,6 +249,7 @@
                                                     newTitle = vData.title;
                                                     changed = true;
                                                 }
+                                                // Update playlist thumbnail using first video ID if missing
                                                 if (actualVideoId && v.thumbnail.includes('placehold.co')) {
                                                     newThumbnail = `https://img.youtube.com/vi/${actualVideoId}/hqdefault.jpg`;
                                                     changed = true;
@@ -265,7 +304,7 @@
         setCurrentVideo(video);
         setLastWatched(video);
         setIsMiniplayer(false); 
-        setPlaylistQueue([]); // Reset playlist UI when changing video
+        setPlaylistQueue([]); 
         setCurrentPlaylistIndex(0);
 
         const updatedHistory = [video, ...watchHistory.filter(v => v.id !== video.id)].slice(0, 20);
@@ -276,7 +315,7 @@
 
       const deleteMedia = (e, id) => {
         e.stopPropagation();
-        setConfirmState({ isOpen: true, message: 'আপনি কি নিশ্চিত যে এটি ডিলিট করতে চান?', targetId: id });
+        setConfirmState({ isOpen: true, message: 'আপনি কি নিশ্চিত যে এই আইটেমটি ডিলিট করতে চান?', targetId: id });
       };
 
       const executeDelete = () => {
@@ -525,7 +564,7 @@
 
                 <div className={`lg:w-1/3 w-full flex flex-col gap-3 ${isMiniplayer ? 'hidden' : 'flex'}`}>
                   
-                  {/* Playlist View on Right Side */}
+                  {/* Playlist View on Right Side with Auto-Fetched Titles */}
                   {playlistQueue.length > 0 && currentVideoData?.type.includes('playlist') && (
                       <div className="bg-[#212121] rounded-xl border border-white/10 flex flex-col max-h-[500px] shadow-lg mb-2">
                           <div className="p-4 border-b border-white/10 bg-[#181818] rounded-t-xl">
@@ -535,9 +574,23 @@
                           <div className="overflow-y-auto flex-1 p-2 flex flex-col gap-1 custom-scrollbar">
                               {playlistQueue.map((vidId, index) => {
                                   const isPlaying = index === currentPlaylistIndex;
+                                  
+                                  // Fetching title logic
                                   const localVidInfo = videos.find(v => v.videoId === vidId);
-                                  const title = localVidInfo ? localVidInfo.title : `ভিডিও ${index + 1}`;
-                                  const channel = localVidInfo ? localVidInfo.channel : 'YouTube';
+                                  const meta = fetchedMeta[vidId];
+                                  
+                                  let title = `ভিডিও ${index + 1}`;
+                                  let channel = 'YouTube';
+
+                                  if (localVidInfo) {
+                                      title = localVidInfo.title;
+                                      channel = localVidInfo.channel;
+                                  } else if (meta && meta.title) {
+                                      title = meta.title;
+                                      channel = meta.channel;
+                                  } else if (meta && meta.loading) {
+                                      title = 'লোড হচ্ছে...';
+                                  }
 
                                   return (
                                       <div 
