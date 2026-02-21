@@ -21,7 +21,6 @@
   <!-- YouTube Iframe API -->
   <script src="https://www.youtube.com/iframe_api"></script>
   <script>
-    // YouTube API রেডি হলে React কে জানানোর জন্য
     window.ytApiLoaded = false;
     function onYouTubeIframeAPIReady() {
       window.ytApiLoaded = true;
@@ -101,23 +100,20 @@
       const [watchHistory, setWatchHistory] = useState([]);
       const [lastWatched, setLastWatched] = useState(null);
 
-      // Miniplayer & Drag-and-Drop States
+      // Miniplayer States (using absolute coordinates for better resizing)
       const [isMiniplayer, setIsMiniplayer] = useState(false);
-      const [position, setPosition] = useState({ x: 0, y: 0 });
+      const [playerRect, setPlayerRect] = useState(null); 
+      
       const [isDragging, setIsDragging] = useState(false);
       const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
 
-      // Resize States
-      const [playerSize, setPlayerSize] = useState({ width: 384 }); // Default 384px width
-      const [isResizing, setIsResizing] = useState(false);
-      const [resizeOffset, setResizeOffset] = useState({ initialWidth: 0, initialX: 0 });
+      // 8-Way Resize States
+      const [resizeState, setResizeState] = useState({ active: false, dir: null, startX: 0, startY: 0, startLeft: 0, startTop: 0, startWidth: 0, startHeight: 0 });
 
-      // YouTube API States
       const [ytReady, setYtReady] = useState(window.ytApiLoaded);
       const playerRef = useRef(null);
       const timeIntervalRef = useRef(null);
 
-      // Load History
       useEffect(() => {
         const savedHistory = localStorage.getItem('ytCloneHistory');
         const savedLastWatched = localStorage.getItem('ytCloneLastWatched');
@@ -130,12 +126,11 @@
         return () => window.removeEventListener('yt-api-ready', handleReady);
       }, []);
 
-      // Initialize / Update YouTube Player
+      // YouTube Player Initialization (Fixed Black Screen Issue)
       useEffect(() => {
         if (!ytReady) return;
         
         if (!currentVideo) {
-            // যদি ভিডিও ক্লোজ করা হয়, প্লেয়ার ডেস্ট্রয় করে দিন
             if (playerRef.current) {
                 playerRef.current.destroy();
                 playerRef.current = null;
@@ -143,40 +138,47 @@
             return;
         }
 
-        // লোকাল স্টোরেজ থেকে সেভ করা সময় (watch time) বের করা
         const currentTimes = JSON.parse(localStorage.getItem('ytCloneTimes') || '{}');
         const startSeconds = currentTimes[currentVideo.id] || 0;
 
         if (!playerRef.current) {
-            // নতুন প্লেয়ার তৈরি করা
-            playerRef.current = new window.YT.Player('yt-player-div', {
-                videoId: currentVideo.id,
-                playerVars: { 
-                    autoplay: 1, 
-                    start: startSeconds,
-                    enablejsapi: 1,
-                    playsinline: 1
-                },
-                events: {
-                    onStateChange: (e) => {
-                        // যখন ভিডিও চলছে, তখন প্রতি সেকেন্ডে সময় সেভ করা
-                        if (e.data === window.YT.PlayerState.PLAYING) {
-                            timeIntervalRef.current = setInterval(() => {
-                                if (playerRef.current && playerRef.current.getCurrentTime) {
-                                    const time = Math.floor(playerRef.current.getCurrentTime());
-                                    const times = JSON.parse(localStorage.getItem('ytCloneTimes') || '{}');
-                                    times[currentVideo.id] = time;
-                                    localStorage.setItem('ytCloneTimes', JSON.stringify(times));
-                                }
-                            }, 1000);
-                        } else {
-                            clearInterval(timeIntervalRef.current);
+            // Inject a pure div that React won't touch
+            const wrapper = document.getElementById('yt-player-wrapper');
+            if (wrapper && !document.getElementById('yt-player-instance')) {
+                const div = document.createElement('div');
+                div.id = 'yt-player-instance';
+                wrapper.appendChild(div);
+
+                playerRef.current = new window.YT.Player('yt-player-instance', {
+                    height: '100%',
+                    width: '100%',
+                    videoId: currentVideo.id,
+                    playerVars: { 
+                        autoplay: 1, 
+                        start: startSeconds,
+                        enablejsapi: 1,
+                        playsinline: 1
+                    },
+                    events: {
+                        onReady: (e) => { e.target.playVideo(); }, // Force play
+                        onStateChange: (e) => {
+                            if (e.data === window.YT.PlayerState.PLAYING) {
+                                timeIntervalRef.current = setInterval(() => {
+                                    if (playerRef.current && playerRef.current.getCurrentTime) {
+                                        const time = Math.floor(playerRef.current.getCurrentTime());
+                                        const times = JSON.parse(localStorage.getItem('ytCloneTimes') || '{}');
+                                        times[currentVideo.id] = time;
+                                        localStorage.setItem('ytCloneTimes', JSON.stringify(times));
+                                    }
+                                }, 1000);
+                            } else {
+                                clearInterval(timeIntervalRef.current);
+                            }
                         }
                     }
-                }
-            });
+                });
+            }
         } else {
-            // আগের প্লেয়ারেই নতুন ভিডিও লোড করা (রিলোড ছাড়াই)
             playerRef.current.loadVideoById({
                 videoId: currentVideo.id,
                 startSeconds: startSeconds
@@ -186,11 +188,24 @@
         return () => clearInterval(timeIntervalRef.current);
       }, [currentVideo, ytReady]);
 
+      const activateMiniplayer = () => {
+        if (!playerRect) {
+            const w = 384;
+            const h = w * (9/16);
+            setPlayerRect({
+                left: window.innerWidth - w - 24,
+                top: window.innerHeight - h - 24,
+                width: w,
+                height: h
+            });
+        }
+        setIsMiniplayer(true);
+      };
+
       const playVideo = (video) => {
         setCurrentVideo(video);
         setLastWatched(video);
         setIsMiniplayer(false); 
-        setPosition({x: 0, y: 0});
         
         const updatedHistory = [video, ...watchHistory.filter(v => v.id !== video.id)].slice(0, 20);
         setWatchHistory(updatedHistory);
@@ -203,48 +218,89 @@
         video.channel.toLowerCase().includes(searchQuery.toLowerCase())
       );
 
-      // --- Drag and Drop Logic ---
+      // --- Drag Logic ---
       const handleDragStart = (e) => {
-        if (e.target.closest('button')) return; // বাটনে ক্লিক করলে ড্র্যাগ বন্ধ
+        if (e.target.closest('button')) return;
         setIsDragging(true);
         const clientX = e.type.includes('mouse') ? e.clientX : e.touches[0].clientX;
         const clientY = e.type.includes('mouse') ? e.clientY : e.touches[0].clientY;
-        setDragOffset({ x: clientX - position.x, y: clientY - position.y });
+        setDragOffset({ x: clientX - playerRect.left, y: clientY - playerRect.top });
       };
 
-      // --- Resize Logic ---
-      const handleResizeStart = (e) => {
+      // --- 8-Way Resize Logic ---
+      const handleResizeStart = (e, dir) => {
         e.stopPropagation();
         e.preventDefault();
-        setIsResizing(true);
         const clientX = e.type.includes('mouse') ? e.clientX : e.touches[0].clientX;
-        setResizeOffset({ initialWidth: playerSize.width, initialX: clientX });
+        const clientY = e.type.includes('mouse') ? e.clientY : e.touches[0].clientY;
+        setResizeState({
+            active: true, dir, startX: clientX, startY: clientY,
+            startLeft: playerRect.left, startTop: playerRect.top,
+            startWidth: playerRect.width, startHeight: playerRect.height
+        });
       };
 
-      // Mouse Move & Up Listeners
       useEffect(() => {
         const handleMove = (e) => {
           const clientX = e.type.includes('mouse') ? e.clientX : e.touches[0].clientX;
           const clientY = e.type.includes('mouse') ? e.clientY : e.touches[0].clientY;
           
-          if (isDragging) {
-            setPosition({ x: clientX - dragOffset.x, y: clientY - dragOffset.y });
-          } else if (isResizing) {
-            // বাঁদিকের কোণা ধরে টানলে width বাড়বে
-            const dx = resizeOffset.initialX - clientX;
-            let newWidth = resizeOffset.initialWidth + dx;
-            if (newWidth < 280) newWidth = 280; // Minimum size
-            if (newWidth > 800) newWidth = 800; // Maximum size
-            setPlayerSize({ width: newWidth });
+          if (isDragging && playerRect) {
+            setPlayerRect(prev => ({ ...prev, left: clientX - dragOffset.x, top: clientY - dragOffset.y }));
+          } 
+          else if (resizeState.active) {
+            const dx = clientX - resizeState.startX;
+            const dy = clientY - resizeState.startY;
+            let { startLeft, startTop, startWidth, startHeight, dir } = resizeState;
+            
+            let newWidth = startWidth;
+            let newLeft = startLeft;
+            let newTop = startTop;
+
+            if (dir.includes('e')) newWidth = startWidth + dx;
+            else if (dir.includes('w')) {
+                newWidth = startWidth - dx;
+                newLeft = startLeft + dx;
+            } 
+            else if (dir === 'n') {
+                const newHeight = startHeight - dy;
+                newWidth = newHeight * (16/9);
+                newTop = startTop + dy;
+                newLeft = startLeft + (startWidth - newWidth) / 2;
+            } 
+            else if (dir === 's') {
+                const newHeight = startHeight + dy;
+                newWidth = newHeight * (16/9);
+                newLeft = startLeft + (startWidth - newWidth) / 2;
+            }
+
+            // Constraints
+            if (newWidth < 250) {
+                const diff = 250 - newWidth;
+                newWidth = 250;
+                if (dir.includes('w')) newLeft -= diff;
+            }
+            if (newWidth > 800) {
+                const diff = newWidth - 800;
+                newWidth = 800;
+                if (dir.includes('w')) newLeft += diff;
+            }
+
+            const newHeight = newWidth * (9/16);
+
+            // Fix Y axis for diagonal resizes to maintain anchor
+            if (dir.includes('n') && dir !== 'n') newTop = startTop + (startHeight - newHeight);
+
+            setPlayerRect({ left: newLeft, top: newTop, width: newWidth, height: newHeight });
           }
         };
 
         const handleUp = () => {
           setIsDragging(false);
-          setIsResizing(false);
+          setResizeState(prev => ({ ...prev, active: false }));
         };
 
-        if (isDragging || isResizing) {
+        if (isDragging || resizeState.active) {
           window.addEventListener('mousemove', handleMove);
           window.addEventListener('mouseup', handleUp);
           window.addEventListener('touchmove', handleMove, { passive: false });
@@ -256,26 +312,16 @@
           window.removeEventListener('touchmove', handleMove);
           window.removeEventListener('touchend', handleUp);
         };
-      }, [isDragging, isResizing, dragOffset, resizeOffset]);
+      }, [isDragging, resizeState, dragOffset, playerRect]);
 
       return (
         <div className="min-h-screen flex flex-col relative overflow-hidden">
-          {/* Navbar */}
           <header className="flex items-center justify-between px-4 py-2 sticky top-0 bg-[#0f0f0f] z-50 h-16 border-b border-white/10">
             <div className="flex items-center gap-4">
-              <button 
-                onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-                className="p-2 hover:bg-white/10 rounded-full transition-colors"
-              >
+              <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="p-2 hover:bg-white/10 rounded-full transition-colors">
                 <i className="fas fa-bars text-xl"></i>
               </button>
-              <div 
-                className="flex items-center gap-2 cursor-pointer" 
-                onClick={() => { 
-                  if (currentVideo) setIsMiniplayer(true); // হোমপেজে গেলে সিমলেস মিনিপ্লেয়ার
-                  setActiveTab('home'); 
-                }}
-              >
+              <div className="flex items-center gap-2 cursor-pointer" onClick={() => { if (currentVideo) activateMiniplayer(); setActiveTab('home'); }}>
                 <i className="fab fa-youtube text-red-600 text-3xl"></i>
                 <span className="text-xl font-bold tracking-tighter hidden sm:block">YouTube</span>
               </div>
@@ -307,49 +353,49 @@
           </header>
 
           <div className="flex flex-1 overflow-hidden">
-            {/* Sidebar */}
             <aside className={`${isSidebarOpen ? 'w-60' : 'w-20'} hidden md:flex flex-col bg-[#0f0f0f] transition-all duration-300 overflow-y-auto px-2 py-3 border-r border-white/10`}>
-              <SidebarItem icon={<i className="fas fa-home text-xl"></i>} label="হোম" isOpen={isSidebarOpen} active={activeTab === 'home' && !currentVideo} onClick={() => { setActiveTab('home'); if(currentVideo) setIsMiniplayer(true); }} />
+              <SidebarItem icon={<i className="fas fa-home text-xl"></i>} label="হোম" isOpen={isSidebarOpen} active={activeTab === 'home' && !currentVideo} onClick={() => { setActiveTab('home'); if(currentVideo) activateMiniplayer(); }} />
               <SidebarItem icon={<i className="fab fa-youtube text-xl"></i>} label="শর্টস" isOpen={isSidebarOpen} />
-              
               {isSidebarOpen && <hr className="border-white/20 my-3" />}
-              
-              <SidebarItem icon={<i className="fas fa-history text-xl"></i>} label="ইতিহাস" isOpen={isSidebarOpen} active={activeTab === 'history'} onClick={() => { setActiveTab('history'); if(currentVideo) setIsMiniplayer(true); }} />
+              <SidebarItem icon={<i className="fas fa-history text-xl"></i>} label="ইতিহাস" isOpen={isSidebarOpen} active={activeTab === 'history'} onClick={() => { setActiveTab('history'); if(currentVideo) activateMiniplayer(); }} />
             </aside>
 
             <main className="flex-1 overflow-y-auto bg-[#0f0f0f] relative">
               
-              {/* --- PERSISTENT VIDEO PLAYER VIEW --- 
-                  This CSS trick prevents the video from ever unmounting! */}
-              <div 
-                className={`max-w-[1600px] mx-auto p-4 flex-col lg:flex-row gap-6 
-                  ${(currentVideo && !isMiniplayer) ? 'flex' : 'absolute w-0 h-0 overflow-hidden invisible'}
-                `}
-              >
-                <div className="flex-1 lg:w-2/3 flex flex-col">
+              {/* --- PERSISTENT VIDEO PLAYER VIEW --- */}
+              <div className={`max-w-[1600px] mx-auto p-4 flex-col lg:flex-row gap-6 ${(currentVideo && !isMiniplayer) ? 'flex' : 'absolute w-0 h-0 overflow-hidden invisible'}`}>
+                <div className="flex-1 lg:w-2/3 flex flex-col relative">
                   
                   {/* The Video Container */}
                   {currentVideo && (
                     <div 
-                      className={`transition-all duration-300
-                        ${isMiniplayer 
-                          ? 'fixed bg-[#212121] rounded-xl shadow-2xl z-[100] border border-gray-700 flex flex-col overflow-hidden visible' 
-                          : 'w-full aspect-video bg-black rounded-xl overflow-hidden shadow-lg relative'
-                        }
-                      `}
-                      style={isMiniplayer ? {
-                        width: `${playerSize.width}px`,
-                        transform: `translate(${position.x}px, ${position.y}px)`,
-                        bottom: '24px', right: '24px',
-                        transition: isDragging || isResizing ? 'none' : 'transform 0.1s ease-out'
+                      className={`${isMiniplayer ? 'fixed bg-[#212121] rounded-xl shadow-2xl z-[100] border border-gray-700 flex flex-col overflow-visible visible' : 'w-full aspect-video bg-black rounded-xl overflow-hidden shadow-lg relative'}`}
+                      style={isMiniplayer && playerRect ? {
+                        left: `${playerRect.left}px`,
+                        top: `${playerRect.top}px`,
+                        width: `${playerRect.width}px`,
+                        height: `${playerRect.height}px`,
                       } : {}}
                     >
+                      {/* 8-Way Resize Handles */}
+                      {isMiniplayer && (
+                        <>
+                          <div className="absolute -top-2 left-2 right-2 h-4 cursor-n-resize z-20" onMouseDown={(e) => handleResizeStart(e, 'n')} onTouchStart={(e) => handleResizeStart(e, 'n')} />
+                          <div className="absolute -bottom-2 left-2 right-2 h-4 cursor-s-resize z-20" onMouseDown={(e) => handleResizeStart(e, 's')} onTouchStart={(e) => handleResizeStart(e, 's')} />
+                          <div className="absolute top-2 bottom-2 -left-2 w-4 cursor-w-resize z-20" onMouseDown={(e) => handleResizeStart(e, 'w')} onTouchStart={(e) => handleResizeStart(e, 'w')} />
+                          <div className="absolute top-2 bottom-2 -right-2 w-4 cursor-e-resize z-20" onMouseDown={(e) => handleResizeStart(e, 'e')} onTouchStart={(e) => handleResizeStart(e, 'e')} />
+                          <div className="absolute -top-2 -left-2 w-6 h-6 cursor-nw-resize z-30" onMouseDown={(e) => handleResizeStart(e, 'nw')} onTouchStart={(e) => handleResizeStart(e, 'nw')} />
+                          <div className="absolute -top-2 -right-2 w-6 h-6 cursor-ne-resize z-30" onMouseDown={(e) => handleResizeStart(e, 'ne')} onTouchStart={(e) => handleResizeStart(e, 'ne')} />
+                          <div className="absolute -bottom-2 -left-2 w-6 h-6 cursor-sw-resize z-30" onMouseDown={(e) => handleResizeStart(e, 'sw')} onTouchStart={(e) => handleResizeStart(e, 'sw')} />
+                          <div className="absolute -bottom-2 -right-2 w-6 h-6 cursor-se-resize z-30" onMouseDown={(e) => handleResizeStart(e, 'se')} onTouchStart={(e) => handleResizeStart(e, 'se')} />
+                        </>
+                      )}
+
                       {/* Miniplayer Drag Header */}
                       {isMiniplayer && (
-                        <div className="flex justify-between items-center p-3 bg-[#181818] cursor-move select-none" onMouseDown={handleDragStart} onTouchStart={handleDragStart}>
+                        <div className="absolute -top-10 left-0 right-0 h-10 flex justify-between items-center px-3 bg-[#181818] rounded-t-xl cursor-move select-none z-10 shadow-md border border-gray-700" onMouseDown={handleDragStart} onTouchStart={handleDragStart}>
                           <div className="flex flex-col truncate pr-2 w-[75%]">
                             <span className="text-sm font-bold truncate text-white">{currentVideo.title}</span>
-                            <span className="text-xs text-gray-400 truncate">{currentVideo.channel}</span>
                           </div>
                           <div className="flex gap-4 text-gray-400 items-center">
                             <button onClick={() => setIsMiniplayer(false)} className="hover:text-white" title="Expand">
@@ -362,31 +408,17 @@
                         </div>
                       )}
 
-                      {/* The actual YouTube Player Area */}
-                      <div className="w-full relative aspect-video bg-black pointer-events-auto">
-                        {/* Invisible overlay during drag/resize to fix iframe block bugs */}
-                        {(isDragging || isResizing) && <div className="absolute inset-0 z-10 bg-transparent"></div>}
-                        <div id="yt-player-div" className="w-full h-full"></div>
+                      {/* Wrapper for the YouTube API Injection */}
+                      <div className="w-full h-full relative bg-black pointer-events-auto overflow-hidden rounded-xl">
+                        {(isDragging || resizeState.active) && <div className="absolute inset-0 z-10 bg-transparent"></div>}
+                        <div id="yt-player-wrapper" className="w-full h-full"></div>
                       </div>
-
-                      {/* Miniplayer Resize Handle (Bottom-Left) */}
-                      {isMiniplayer && (
-                        <div 
-                          className="absolute bottom-0 left-0 w-8 h-8 cursor-sw-resize z-20 flex items-end justify-start p-1.5 opacity-60 hover:opacity-100"
-                          onMouseDown={handleResizeStart}
-                          onTouchStart={handleResizeStart}
-                          title="Resize"
-                        >
-                          <i className="fas fa-caret-down transform rotate-45 text-white text-sm"></i>
-                        </div>
-                      )}
                     </div>
                   )}
 
-                  {/* Video Details (Hidden in Miniplayer mode) */}
+                  {/* Video Details */}
                   <div className={`${isMiniplayer ? 'hidden' : 'block'}`}>
                     <h1 className="text-xl md:text-2xl font-bold mt-4 mb-2">{currentVideo?.title}</h1>
-                    
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                       <div className="flex items-center gap-3">
                         <img src={currentVideo?.channelAvatar} alt={currentVideo?.channel} className="w-10 h-10 rounded-full" />
@@ -396,9 +428,8 @@
                         </div>
                         <button className="bg-white text-black px-4 py-2 rounded-full font-bold ml-2 hover:bg-gray-200 transition">সাবস্ক্রাইব</button>
                       </div>
-                      
                       <div className="flex items-center gap-2">
-                        <button onClick={() => setIsMiniplayer(true)} className="flex items-center gap-2 px-4 py-2 bg-white/10 rounded-full hover:bg-white/20 transition font-bold" title="Miniplayer">
+                        <button onClick={activateMiniplayer} className="flex items-center gap-2 px-4 py-2 bg-white/10 rounded-full hover:bg-white/20 transition font-bold" title="Miniplayer">
                           <i className="fas fa-compress-alt"></i> মিনিপ্লেয়ার
                         </button>
                       </div>
@@ -426,7 +457,6 @@
               {/* --- HOME / GRID VIEW --- */}
               <div className={`p-4 sm:p-6 lg:p-8 max-w-[1800px] mx-auto ${(!currentVideo || isMiniplayer) ? 'block' : 'hidden'}`}>
                 
-                {/* Resume Banner */}
                 {activeTab === 'home' && lastWatched && !searchQuery && (
                   <div className="mb-8 bg-gradient-to-r from-blue-900/40 to-purple-900/40 border border-white/10 rounded-2xl p-4 flex flex-col sm:flex-row items-center justify-between gap-4 shadow-xl">
                     <div className="flex items-center gap-4 w-full sm:w-auto">
@@ -443,10 +473,7 @@
                         <h4 className="font-bold line-clamp-1">{lastWatched.title}</h4>
                       </div>
                     </div>
-                    <button 
-                      onClick={() => playVideo(lastWatched)}
-                      className="bg-white text-black px-6 py-2 rounded-full font-bold hover:bg-gray-200 transition"
-                    >
+                    <button onClick={() => playVideo(lastWatched)} className="bg-white text-black px-6 py-2 rounded-full font-bold hover:bg-gray-200 transition">
                       প্লে করুন
                     </button>
                   </div>
@@ -483,10 +510,7 @@
 
     function SidebarItem({ icon, label, isOpen, active, onClick }) {
       return (
-        <div 
-          onClick={onClick}
-          className={`flex items-center ${isOpen ? 'justify-start px-3' : 'justify-center flex-col'} py-2.5 my-1 rounded-xl cursor-pointer transition-colors ${active ? 'bg-white/10 font-bold' : 'hover:bg-white/10'}`}
-        >
+        <div onClick={onClick} className={`flex items-center ${isOpen ? 'justify-start px-3' : 'justify-center flex-col'} py-2.5 my-1 rounded-xl cursor-pointer transition-colors ${active ? 'bg-white/10 font-bold' : 'hover:bg-white/10'}`}>
           <div className={`flex items-center justify-center ${isOpen ? 'mr-4' : 'mb-1'} ${active ? 'text-white' : 'text-gray-200'}`}>
             {icon}
           </div>
