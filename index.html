@@ -27,6 +27,13 @@
       window.dispatchEvent(new Event('yt-api-ready'));
     }
   </script>
+  <style>
+    /* Custom Scrollbar for Playlist Queue */
+    .custom-scrollbar::-webkit-scrollbar { width: 6px; }
+    .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+    .custom-scrollbar::-webkit-scrollbar-thumb { background: #555; border-radius: 10px; }
+    .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #888; }
+  </style>
 </head>
 <body class="bg-[#0f0f0f] text-white font-sans">
   <div id="root"></div>
@@ -36,37 +43,19 @@
 
     const initialVideos = [
       {
-        id: 'aqz-KE-bpKQ',
-        videoId: 'aqz-KE-bpKQ',
-        listId: null,
-        type: 'video',
-        title: 'Big Buck Bunny 60fps 4K - Official Blender Foundation Short Film',
-        channel: 'Blender',
-        views: '12M views',
-        thumbnail: 'https://img.youtube.com/vi/aqz-KE-bpKQ/maxresdefault.jpg',
-        channelAvatar: 'https://ui-avatars.com/api/?name=Blender&background=random',
+        id: 'aqz-KE-bpKQ', videoId: 'aqz-KE-bpKQ', listId: null, type: 'video',
+        title: 'Big Buck Bunny 60fps 4K - Official Blender Foundation Short Film', channel: 'Blender', views: '12M views',
+        thumbnail: 'https://img.youtube.com/vi/aqz-KE-bpKQ/hqdefault.jpg', channelAvatar: 'https://ui-avatars.com/api/?name=Blender&background=random',
       },
       {
-        id: 'LXb3EKWsInQ',
-        videoId: 'LXb3EKWsInQ',
-        listId: null,
-        type: 'video',
-        title: 'COSTA RICA IN 4K 60fps HDR (ULTRA HD)',
-        channel: 'Jacob + Katie Schwarz',
-        views: '150M views',
-        thumbnail: 'https://img.youtube.com/vi/LXb3EKWsInQ/maxresdefault.jpg',
-        channelAvatar: 'https://ui-avatars.com/api/?name=Jacob&background=random',
+        id: 'LXb3EKWsInQ', videoId: 'LXb3EKWsInQ', listId: null, type: 'video',
+        title: 'COSTA RICA IN 4K 60fps HDR (ULTRA HD)', channel: 'Jacob + Katie Schwarz', views: '150M views',
+        thumbnail: 'https://img.youtube.com/vi/LXb3EKWsInQ/hqdefault.jpg', channelAvatar: 'https://ui-avatars.com/api/?name=Jacob&background=random',
       },
       {
-        id: 'w7ejDZ8SWv8',
-        videoId: 'w7ejDZ8SWv8',
-        listId: null,
-        type: 'video',
-        title: 'React JS Crash Course for Beginners',
-        channel: 'Code Step By Step',
-        views: '2.5M views',
-        thumbnail: 'https://img.youtube.com/vi/w7ejDZ8SWv8/maxresdefault.jpg',
-        channelAvatar: 'https://ui-avatars.com/api/?name=Code&background=random',
+        id: 'w7ejDZ8SWv8', videoId: 'w7ejDZ8SWv8', listId: null, type: 'video',
+        title: 'React JS Crash Course for Beginners', channel: 'Code Step By Step', views: '2.5M views',
+        thumbnail: 'https://img.youtube.com/vi/w7ejDZ8SWv8/hqdefault.jpg', channelAvatar: 'https://ui-avatars.com/api/?name=Code&background=random',
       }
     ];
 
@@ -74,26 +63,18 @@
       let videoId = null;
       let listId = null;
       let title = '';
-      
       let urlStr = input.replace(/&amp;/g, '&');
 
       const iframeMatch = urlStr.match(/src=["'](.*?)["']/);
       if (iframeMatch) urlStr = iframeMatch[1];
-      
       const titleMatch = input.match(/title=["'](.*?)["']/);
       if (titleMatch) title = titleMatch[1];
       
-      // ইগনোর ডিফল্ট টাইটেল যাতে অটো-ফেচ কাজ করে
-      if(title.toLowerCase() === 'youtube video player') {
-          title = ''; 
-      }
+      if(title.toLowerCase() === 'youtube video player' || title.toLowerCase() === 'custom video') title = ''; 
 
       try {
-        if (!urlStr.startsWith('http') && !urlStr.startsWith('//')) {
-          urlStr = 'https://' + urlStr;
-        } else if (urlStr.startsWith('//')) {
-          urlStr = 'https:' + urlStr;
-        }
+        if (!urlStr.startsWith('http') && !urlStr.startsWith('//')) urlStr = 'https://' + urlStr;
+        else if (urlStr.startsWith('//')) urlStr = 'https:' + urlStr;
         
         const url = new URL(urlStr);
         if (url.searchParams.has('v')) videoId = url.searchParams.get('v');
@@ -109,7 +90,6 @@
       } catch (e) {
         console.error("URL Error", e);
       }
-
       return { videoId, listId, title };
     }
 
@@ -125,6 +105,10 @@
       const [activeTab, setActiveTab] = useState('home');
       const [watchHistory, setWatchHistory] = useState([]);
       const [lastWatched, setLastWatched] = useState(null);
+
+      // Playlist Sidebar States
+      const [playlistQueue, setPlaylistQueue] = useState([]);
+      const [currentPlaylistIndex, setCurrentPlaylistIndex] = useState(0);
 
       // Custom Alert & Confirm States
       const [alertState, setAlertState] = useState({ isOpen: false, message: '' });
@@ -146,7 +130,6 @@
       const playerRef = useRef(null);
       const timeIntervalRef = useRef(null);
 
-      // Current Video Data helper to always show updated title
       const currentVideoData = currentVideo ? (videos.find(v => v.id === currentVideo.id) || currentVideo) : null;
 
       useEffect(() => {
@@ -200,23 +183,46 @@
                     events: {
                         onReady: (e) => { e.target.playVideo(); },
                         onStateChange: (e) => {
+                            if (e.data === window.YT.PlayerState.PLAYING || e.data === window.YT.PlayerState.UNSTARTED || e.data === window.YT.PlayerState.CUED) {
+                                // Extract Playlist Data for Right Sidebar
+                                if (currentVideo.type.includes('playlist')) {
+                                    const queue = e.target.getPlaylist();
+                                    if (queue && queue.length > 0) {
+                                        setPlaylistQueue(queue);
+                                        setCurrentPlaylistIndex(e.target.getPlaylistIndex() || 0);
+                                    }
+                                }
+                            }
+
                             if (e.data === window.YT.PlayerState.PLAYING) {
-                                
-                                // --- AUTO TITLE FETCH LOGIC ---
+                                // --- AUTO TITLE & THUMBNAIL FETCH LOGIC ---
                                 const vData = e.target.getVideoData();
-                                if (vData && vData.title) {
+                                const actualVideoId = vData?.video_id;
+
+                                if (vData && (vData.title || actualVideoId)) {
                                     setVideos(prev => {
+                                        let changed = false;
                                         const updated = prev.map(v => {
-                                            if (v.id === currentVideo.id && (v.title === 'YouTube Video' || v.title === 'YouTube Playlist' || v.title === 'Custom Video' || v.title === '')) {
-                                                return { ...v, title: vData.title };
+                                            if (v.id === currentVideo.id) {
+                                                let newTitle = v.title;
+                                                let newThumbnail = v.thumbnail;
+
+                                                if (vData.title && (v.title === 'YouTube Video' || v.title === 'YouTube Playlist' || v.title === 'Custom Video' || v.title === '')) {
+                                                    newTitle = vData.title;
+                                                    changed = true;
+                                                }
+                                                if (actualVideoId && v.thumbnail.includes('placehold.co')) {
+                                                    newThumbnail = `https://img.youtube.com/vi/${actualVideoId}/hqdefault.jpg`;
+                                                    changed = true;
+                                                }
+                                                if(changed) return { ...v, title: newTitle, thumbnail: newThumbnail };
                                             }
                                             return v;
                                         });
-                                        localStorage.setItem('ytCloneVideos', JSON.stringify(updated));
-                                        return updated;
+                                        if(changed) localStorage.setItem('ytCloneVideos', JSON.stringify(updated));
+                                        return changed ? updated : prev;
                                     });
                                 }
-                                // ------------------------------
 
                                 timeIntervalRef.current = setInterval(() => {
                                     if (playerRef.current && playerRef.current.getCurrentTime) {
@@ -259,6 +265,9 @@
         setCurrentVideo(video);
         setLastWatched(video);
         setIsMiniplayer(false); 
+        setPlaylistQueue([]); // Reset playlist UI when changing video
+        setCurrentPlaylistIndex(0);
+
         const updatedHistory = [video, ...watchHistory.filter(v => v.id !== video.id)].slice(0, 20);
         setWatchHistory(updatedHistory);
         localStorage.setItem('ytCloneHistory', JSON.stringify(updatedHistory));
@@ -296,7 +305,7 @@
         let finalTitle = newMediaInput.title || extractedTitle;
         if (!finalTitle) finalTitle = type === 'playlist' ? 'YouTube Playlist' : 'YouTube Video';
 
-        const thumbnail = videoId ? `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg` : 'https://placehold.co/640x360/222222/FFFFFF/png?text=YouTube+Playlist';
+        const thumbnail = videoId ? `https://img.youtube.com/vi/${videoId}/hqdefault.jpg` : 'https://placehold.co/640x360/222222/FFFFFF/png?text=YouTube+Playlist';
 
         const newMedia = {
             id: id, videoId, listId, type, title: finalTitle,
@@ -318,7 +327,7 @@
             return;
         }
         
-        const firstVid = videos.find(v => v.id === selectedVideoIds[0]);
+        const firstVid = videos.find(v => v.videoId === selectedVideoIds[0]);
         const newPlaylist = {
             id: 'local-list-' + Date.now(), type: 'local_playlist', title: newListTitle || 'My Playlist',
             videoIds: selectedVideoIds, thumbnail: firstVid ? firstVid.thumbnail : 'https://placehold.co/640x360/222222/FFFFFF/png?text=Playlist',
@@ -438,14 +447,14 @@
           </header>
 
           <div className="flex flex-1 overflow-hidden">
-            <aside className={`${isSidebarOpen ? 'w-60' : 'w-20'} hidden md:flex flex-col bg-[#0f0f0f] transition-all duration-300 overflow-y-auto px-2 py-3 border-r border-white/10`}>
+            <aside className={`${isSidebarOpen ? 'w-60' : 'w-20'} hidden md:flex flex-col bg-[#0f0f0f] transition-all duration-300 overflow-y-auto px-2 py-3 border-r border-white/10 custom-scrollbar`}>
               <SidebarItem icon={<i className="fas fa-home text-xl"></i>} label="হোম" isOpen={isSidebarOpen} active={activeTab === 'home' && !currentVideo} onClick={() => { setActiveTab('home'); if(currentVideo) activateMiniplayer(); }} />
               <SidebarItem icon={<i className="fab fa-youtube text-xl"></i>} label="শর্টস" isOpen={isSidebarOpen} />
               {isSidebarOpen && <hr className="border-white/20 my-3" />}
               <SidebarItem icon={<i className="fas fa-history text-xl"></i>} label="ইতিহাস" isOpen={isSidebarOpen} active={activeTab === 'history'} onClick={() => { setActiveTab('history'); if(currentVideo) activateMiniplayer(); }} />
             </aside>
 
-            <main className="flex-1 overflow-y-auto bg-[#0f0f0f] relative">
+            <main className="flex-1 overflow-y-auto bg-[#0f0f0f] relative custom-scrollbar">
               
               {/* PERSISTENT VIDEO PLAYER VIEW */}
               <div className={`max-w-[1600px] mx-auto p-4 flex-col lg:flex-row gap-6 ${(currentVideo && !isMiniplayer) ? 'flex' : 'absolute w-0 h-0 overflow-hidden invisible'}`}>
@@ -515,7 +524,45 @@
                 </div>
 
                 <div className={`lg:w-1/3 w-full flex flex-col gap-3 ${isMiniplayer ? 'hidden' : 'flex'}`}>
-                  <h3 className="font-bold text-lg mb-2">আপনার জন্য প্রস্তাবিত</h3>
+                  
+                  {/* Playlist View on Right Side */}
+                  {playlistQueue.length > 0 && currentVideoData?.type.includes('playlist') && (
+                      <div className="bg-[#212121] rounded-xl border border-white/10 flex flex-col max-h-[500px] shadow-lg mb-2">
+                          <div className="p-4 border-b border-white/10 bg-[#181818] rounded-t-xl">
+                              <h3 className="font-bold text-lg leading-tight">{currentVideoData.title}</h3>
+                              <p className="text-xs text-gray-400 mt-1">{currentVideoData.channel} • {currentPlaylistIndex + 1} / {playlistQueue.length}</p>
+                          </div>
+                          <div className="overflow-y-auto flex-1 p-2 flex flex-col gap-1 custom-scrollbar">
+                              {playlistQueue.map((vidId, index) => {
+                                  const isPlaying = index === currentPlaylistIndex;
+                                  const localVidInfo = videos.find(v => v.videoId === vidId);
+                                  const title = localVidInfo ? localVidInfo.title : `ভিডিও ${index + 1}`;
+                                  const channel = localVidInfo ? localVidInfo.channel : 'YouTube';
+
+                                  return (
+                                      <div 
+                                        key={index} 
+                                        onClick={() => playerRef.current?.playVideoAt(index)}
+                                        className={`flex gap-3 p-2 rounded-lg cursor-pointer transition items-center ${isPlaying ? 'bg-white/20' : 'hover:bg-white/10'}`}
+                                      >
+                                          <div className="text-xs text-gray-400 w-4 text-center">
+                                              {isPlaying ? <i className="fas fa-play text-white text-[10px]"></i> : index + 1}
+                                          </div>
+                                          <div className="w-24 h-14 flex-shrink-0 relative rounded overflow-hidden bg-black">
+                                              <img src={`https://img.youtube.com/vi/${vidId}/mqdefault.jpg`} className="w-full h-full object-cover" />
+                                          </div>
+                                          <div className="flex flex-col justify-center overflow-hidden pr-2">
+                                              <h4 className={`text-sm font-semibold line-clamp-2 leading-snug ${isPlaying ? 'text-white' : 'text-gray-300'}`}>{title}</h4>
+                                              <p className="text-xs text-gray-400 mt-0.5 truncate">{channel}</p>
+                                          </div>
+                                      </div>
+                                  )
+                              })}
+                          </div>
+                      </div>
+                  )}
+
+                  <h3 className="font-bold text-lg mb-2 mt-2">আপনার জন্য প্রস্তাবিত</h3>
                   {videos.filter(v => v?.id !== currentVideo?.id).map(video => (
                     <div key={video.id} className="flex gap-2 cursor-pointer group relative" onClick={() => playVideo(video)}>
                       <div className="w-40 h-24 flex-shrink-0 relative rounded-lg overflow-hidden bg-gray-900 border border-white/10">
@@ -682,7 +729,7 @@
                         </div>
                         <div>
                             <label className="block text-sm text-gray-400 mb-1">ভিডিও সিলেক্ট করুন</label>
-                            <div className="max-h-60 overflow-y-auto bg-[#121212] rounded-lg p-2 flex flex-col gap-1 border border-gray-600">
+                            <div className="max-h-60 overflow-y-auto bg-[#121212] rounded-lg p-2 flex flex-col gap-1 border border-gray-600 custom-scrollbar">
                                 {videos.filter(v => v.type === 'video').length === 0 && <p className="text-center text-gray-400 py-4 text-sm">কোনো সিঙ্গেল ভিডিও নেই। আগে ভিডিও যোগ করুন!</p>}
                                 {videos.filter(v => v.type === 'video').map(v => (
                                     <label key={v.id} className="flex items-center gap-3 p-2 hover:bg-white/10 rounded cursor-pointer transition">
