@@ -109,7 +109,7 @@
       // Playlist Sidebar States
       const [playlistQueue, setPlaylistQueue] = useState([]);
       const [currentPlaylistIndex, setCurrentPlaylistIndex] = useState(0);
-      const [fetchedMeta, setFetchedMeta] = useState({}); // New state for dynamically fetched titles
+      const [fetchedMeta, setFetchedMeta] = useState({});
 
       // Custom Alert & Confirm States
       const [alertState, setAlertState] = useState({ isOpen: false, message: '' });
@@ -147,40 +147,30 @@
       // Auto-Fetch External Playlist Titles using Noembed API
       useEffect(() => {
         let isMounted = true;
-        
         const fetchMissingTitles = () => {
             playlistQueue.forEach(vidId => {
                 const existsLocally = videos.find(v => v.videoId === vidId);
-                
                 if (!existsLocally) {
                     setFetchedMeta(prev => {
-                        if (prev[vidId]) return prev; // Already fetching or fetched
-                        
-                        // Start fetching the actual title from an open metadata API
+                        if (prev[vidId]) return prev;
                         fetch(`https://noembed.com/embed?url=https://www.youtube.com/watch?v=${vidId}`)
                             .then(res => res.json())
                             .then(data => {
                                 if (data && data.title && isMounted) {
-                                    setFetchedMeta(current => ({
-                                        ...current,
-                                        [vidId]: { title: data.title, channel: data.author_name }
-                                    }));
+                                    setFetchedMeta(current => ({ ...current, [vidId]: { title: data.title, channel: data.author_name } }));
                                 }
                             }).catch(() => {});
-                            
                         return { ...prev, [vidId]: { loading: true } };
                     });
                 }
             });
         };
 
-        if (playlistQueue.length > 0) {
-            fetchMissingTitles();
-        }
-
+        if (playlistQueue.length > 0) fetchMissingTitles();
         return () => { isMounted = false; };
       }, [playlistQueue, videos]);
 
+      // YouTube Player Initialization
       useEffect(() => {
         if (!ytReady) return;
         
@@ -201,16 +191,8 @@
         const isPlaylist = currentVideo.type === 'playlist';
         const isLocalPlaylist = currentVideo.type === 'local_playlist';
         
+        // এখানে playerVars থেকে listType এবং index বাদ দিয়েছি যাতে ভুল ইনডেক্স লোড না হয়
         let playerVars = { autoplay: 1, start: startSeconds, enablejsapi: 1, playsinline: 1 };
-
-        if (isPlaylist) {
-            playerVars.listType = 'playlist';
-            playerVars.list = currentVideo.listId;
-            playerVars.index = startIndex;
-        } else if (isLocalPlaylist) {
-            playerVars.playlist = currentVideo.videoIds.slice(1).join(',');
-            playerVars.index = startIndex;
-        }
 
         if (!playerRef.current) {
             const wrapper = document.getElementById('yt-player-wrapper');
@@ -224,26 +206,37 @@
                     videoId: isLocalPlaylist ? currentVideo.videoIds[0] : (currentVideo.videoId || ''),
                     playerVars: playerVars,
                     events: {
-                        onReady: (e) => { e.target.playVideo(); },
+                        onReady: (e) => { 
+                            // onReady তে force করে সঠিক ইনডেক্স লোড করানো হচ্ছে
+                            if (isPlaylist) {
+                                e.target.loadPlaylist({ list: currentVideo.listId, listType: 'playlist', index: startIndex, startSeconds: startSeconds });
+                            } else if (isLocalPlaylist) {
+                                e.target.loadPlaylist({ playlist: currentVideo.videoIds, index: startIndex, startSeconds: startSeconds });
+                            } else {
+                                e.target.playVideo();
+                            }
+                        },
                         onStateChange: (e) => {
                             if (e.data === window.YT.PlayerState.PLAYING || e.data === window.YT.PlayerState.UNSTARTED || e.data === window.YT.PlayerState.CUED) {
-                                // Extract Playlist Data for Right Sidebar
                                 if (currentVideo.type.includes('playlist')) {
                                     const queue = e.target.getPlaylist();
                                     if (queue && queue.length > 0) {
                                         setPlaylistQueue(queue);
                                         const idx = e.target.getPlaylistIndex();
-                                        if (idx !== null && idx !== undefined) {
+                                        if (idx !== null && idx !== undefined && idx !== -1) {
                                             setCurrentPlaylistIndex(idx);
                                         }
                                         
-                                        // FIX 1: প্রথম ভিডিওর থাম্বনেইল প্লেলিস্টের মূল থাম্বনেইল হিসেবে সেট করা
+                                        // FIX 1: গ্যারান্টি সহকারে প্রথম ভিডিওর থাম্বনেইল প্লেলিস্টের মূল থাম্বনেইল হিসেবে সেট করা
                                         setVideos(prev => {
                                             let changed = false;
                                             const updated = prev.map(v => {
-                                                if (v.id === currentVideo.id && v.thumbnail.includes('placehold.co')) {
-                                                    changed = true;
-                                                    return { ...v, thumbnail: `https://img.youtube.com/vi/${queue[0]}/hqdefault.jpg` };
+                                                if (v.id === currentVideo.id) {
+                                                    const expectedThumb = `https://img.youtube.com/vi/${queue[0]}/hqdefault.jpg`;
+                                                    if (v.thumbnail !== expectedThumb) {
+                                                        changed = true;
+                                                        return { ...v, thumbnail: expectedThumb };
+                                                    }
                                                 }
                                                 return v;
                                             });
@@ -255,24 +248,23 @@
                             }
 
                             if (e.data === window.YT.PlayerState.PLAYING) {
-                                // FIX 2: প্লেলিস্টের সঠিক ইনডেক্স শুধুমাত্র PLAYING স্টেটেই সেভ করা (Off-by-one ফিক্স)
+                                // FIX 2: প্লেলিস্টের সঠিক ইনডেক্স সেভ করা
                                 if (currentVideo.type.includes('playlist')) {
                                     const currentIdx = e.target.getPlaylistIndex();
-                                    if (currentIdx !== null && currentIdx !== undefined) {
+                                    if (currentIdx !== null && currentIdx !== undefined && currentIdx !== -1) {
                                         const indexes = JSON.parse(localStorage.getItem('ytClonePlaylistIndexes') || '{}');
                                         
                                         if (indexes[currentVideo.id] !== currentIdx) {
                                             indexes[currentVideo.id] = currentIdx;
                                             localStorage.setItem('ytClonePlaylistIndexes', JSON.stringify(indexes));
                                             
-                                            // ভিডিও পরিবর্তন হলে আগের সেভ করা সময় (Watch Time) জিরো করে দেওয়া
+                                            // ভিডিও পরিবর্তন হলে আগের সেভ করা সময় জিরো করে দেওয়া
                                             const times = JSON.parse(localStorage.getItem('ytCloneTimes') || '{}');
                                             times[currentVideo.id] = 0;
                                             localStorage.setItem('ytCloneTimes', JSON.stringify(times));
                                         }
                                     }
                                 } else {
-                                    // AUTO TITLE FETCH LOGIC FOR MAIN VIDEO (Only for singles)
                                     const vData = e.target.getVideoData();
                                     if (vData && vData.title) {
                                         setVideos(prev => {
@@ -306,6 +298,7 @@
                 });
             }
         } else {
+            // যদি প্লেয়ার আগে থেকেই থাকে, তাহলে loadPlaylist দিয়ে একদম সঠিক জায়গায় নেওয়া
             if (isPlaylist) {
                 playerRef.current.loadPlaylist({ list: currentVideo.listId, listType: 'playlist', index: startIndex, startSeconds });
             } else if (isLocalPlaylist) {
@@ -328,6 +321,12 @@
       };
 
       const playVideo = (video) => {
+        // FIX 3: যদি ইউজার হোমপেজ থেকে ঠিক বর্তমান চলমান ভিডিওটিতেই ক্লিক করে, তবে শুধু ম্যাক্সিমাইজ হবে (রিলোড হবে না)
+        if (currentVideo && currentVideo.id === video.id) {
+            setIsMiniplayer(false);
+            return;
+        }
+
         setCurrentVideo(video);
         setLastWatched(video);
         setIsMiniplayer(false); 
@@ -418,20 +417,22 @@
 
       if (currentVideoData?.type?.includes('playlist') && playlistQueue.length > 0) {
           const activeVidId = playlistQueue[currentPlaylistIndex];
-          const localVidInfo = videos.find(v => v.videoId === activeVidId);
-          const meta = fetchedMeta[activeVidId];
+          if (activeVidId) {
+              const localVidInfo = videos.find(v => v.videoId === activeVidId);
+              const meta = fetchedMeta[activeVidId];
 
-          if (localVidInfo) {
-              displayTitle = localVidInfo.title;
-              displayChannel = localVidInfo.channel;
-              displayAvatar = localVidInfo.channelAvatar;
-          } else if (meta && meta.title) {
-              displayTitle = meta.title;
-              displayChannel = meta.channel;
-          } else if (meta && meta.loading) {
-              displayTitle = 'লোড হচ্ছে...';
-          } else {
-              displayTitle = `ভিডিও ${currentPlaylistIndex + 1}`;
+              if (localVidInfo) {
+                  displayTitle = localVidInfo.title;
+                  displayChannel = localVidInfo.channel;
+                  displayAvatar = localVidInfo.channelAvatar;
+              } else if (meta && meta.title) {
+                  displayTitle = meta.title;
+                  displayChannel = meta.channel;
+              } else if (meta && meta.loading) {
+                  displayTitle = 'লোড হচ্ছে...';
+              } else {
+                  displayTitle = `ভিডিও ${currentPlaylistIndex + 1}`;
+              }
           }
       }
 
@@ -499,7 +500,6 @@
 
       return (
         <div className="min-h-screen flex flex-col relative overflow-hidden bg-[#0f0f0f]">
-          {/* Header */}
           <header className="flex items-center justify-between px-4 py-2 sticky top-0 bg-[#0f0f0f] z-40 h-16 border-b border-white/10">
             <div className="flex items-center gap-4">
               <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="p-2 hover:bg-white/10 rounded-full transition-colors">
@@ -546,7 +546,6 @@
 
             <main className="flex-1 overflow-y-auto bg-[#0f0f0f] relative custom-scrollbar">
               
-              {/* PERSISTENT VIDEO PLAYER VIEW */}
               <div className={`max-w-[1600px] mx-auto p-4 flex-col lg:flex-row gap-6 ${(currentVideo && !isMiniplayer) ? 'flex' : 'absolute w-0 h-0 overflow-hidden invisible'}`}>
                 <div className="flex-1 lg:w-2/3 flex flex-col relative">
                   {currentVideo && (
@@ -574,7 +573,6 @@
                         </div>
                       </div>
 
-                      {/* 8-Way Resize Handles */}
                       {isMiniplayer && (
                         <>
                           <div className="absolute -top-2 left-2 right-2 h-4 cursor-n-resize z-20" onMouseDown={(e) => handleResizeStart(e, 'n')} onTouchStart={(e) => handleResizeStart(e, 'n')} />
@@ -619,7 +617,6 @@
 
                 <div className={`lg:w-1/3 w-full flex flex-col gap-3 ${isMiniplayer ? 'hidden' : 'flex'}`}>
                   
-                  {/* Playlist View on Right Side with Auto-Fetched Titles */}
                   {playlistQueue.length > 0 && currentVideoData?.type.includes('playlist') && (
                       <div className="bg-[#212121] rounded-xl border border-white/10 flex flex-col max-h-[500px] shadow-lg mb-2">
                           <div className="p-4 border-b border-white/10 bg-[#181818] rounded-t-xl">
@@ -629,8 +626,6 @@
                           <div className="overflow-y-auto flex-1 p-2 flex flex-col gap-1 custom-scrollbar">
                               {playlistQueue.map((vidId, index) => {
                                   const isPlaying = index === currentPlaylistIndex;
-                                  
-                                  // Fetching title logic
                                   const localVidInfo = videos.find(v => v.videoId === vidId);
                                   const meta = fetchedMeta[vidId];
                                   
@@ -690,7 +685,6 @@
                 </div>
               </div>
 
-              {/* HOME / GRID VIEW */}
               <div className={`p-4 sm:p-6 lg:p-8 max-w-[1800px] mx-auto ${(!currentVideo || isMiniplayer) ? 'block' : 'hidden'}`}>
                 
                 {activeTab === 'home' && lastWatched && !searchQuery && (
@@ -755,7 +749,6 @@
             </main>
           </div>
 
-          {/* CUSTOM ALERT MODAL */}
           {alertState.isOpen && (
             <div className="fixed inset-0 z-[300] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm transition-opacity">
                 <div className="bg-[#212121] rounded-2xl w-full max-w-sm border border-gray-700 shadow-2xl p-6 text-center transform transition-all scale-100">
@@ -771,7 +764,6 @@
             </div>
           )}
 
-          {/* CUSTOM CONFIRM MODAL */}
           {confirmState.isOpen && (
             <div className="fixed inset-0 z-[300] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm transition-opacity">
                 <div className="bg-[#212121] rounded-2xl w-full max-w-sm border border-gray-700 shadow-2xl p-6 text-center transform transition-all scale-100">
@@ -792,7 +784,6 @@
             </div>
           )}
 
-          {/* ADD MEDIA MODAL */}
           {isAddModalOpen && (
             <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm">
                 <div className="bg-[#212121] rounded-2xl w-full max-w-lg border border-gray-700 shadow-2xl">
@@ -822,7 +813,6 @@
             </div>
           )}
 
-          {/* CREATE CUSTOM PLAYLIST MODAL */}
           {isCreateListModalOpen && (
             <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm">
                 <div className="bg-[#212121] rounded-2xl w-full max-w-lg border border-gray-700 shadow-2xl">
