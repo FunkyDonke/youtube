@@ -37,62 +37,86 @@
     const initialVideos = [
       {
         id: 'aqz-KE-bpKQ',
+        videoId: 'aqz-KE-bpKQ',
+        listId: null,
+        type: 'video',
         title: 'Big Buck Bunny 60fps 4K - Official Blender Foundation Short Film',
         channel: 'Blender',
-        views: '12M',
-        timestamp: '10 years ago',
+        views: '12M views',
         thumbnail: 'https://img.youtube.com/vi/aqz-KE-bpKQ/maxresdefault.jpg',
         channelAvatar: 'https://ui-avatars.com/api/?name=Blender&background=random',
       },
       {
         id: 'LXb3EKWsInQ',
+        videoId: 'LXb3EKWsInQ',
+        listId: null,
+        type: 'video',
         title: 'COSTA RICA IN 4K 60fps HDR (ULTRA HD)',
         channel: 'Jacob + Katie Schwarz',
-        views: '150M',
-        timestamp: '5 years ago',
+        views: '150M views',
         thumbnail: 'https://img.youtube.com/vi/LXb3EKWsInQ/maxresdefault.jpg',
         channelAvatar: 'https://ui-avatars.com/api/?name=Jacob&background=random',
       },
       {
         id: 'w7ejDZ8SWv8',
+        videoId: 'w7ejDZ8SWv8',
+        listId: null,
+        type: 'video',
         title: 'React JS Crash Course for Beginners',
         channel: 'Code Step By Step',
-        views: '2.5M',
-        timestamp: '1 year ago',
+        views: '2.5M views',
         thumbnail: 'https://img.youtube.com/vi/w7ejDZ8SWv8/maxresdefault.jpg',
         channelAvatar: 'https://ui-avatars.com/api/?name=Code&background=random',
-      },
-      {
-        id: '094y1Z2wpJg',
-        title: 'Beautiful Nature - Relaxing Music, Beautiful Landscapes',
-        channel: 'Nature Relaxation',
-        views: '8M',
-        timestamp: '2 years ago',
-        thumbnail: 'https://img.youtube.com/vi/094y1Z2wpJg/maxresdefault.jpg',
-        channelAvatar: 'https://ui-avatars.com/api/?name=Nature&background=random',
-      },
-      {
-        id: 'dGcsHMXbSOA',
-        title: 'Bangla Natok | X-Boyfriend | এক্স বয়ফ্রেন্ড',
-        channel: 'Bangla Entertainment',
-        views: '15M',
-        timestamp: '3 years ago',
-        thumbnail: 'https://img.youtube.com/vi/dGcsHMXbSOA/maxresdefault.jpg',
-        channelAvatar: 'https://ui-avatars.com/api/?name=Bangla&background=random',
-      },
-      {
-        id: 'kJQP7kiw5Fk',
-        title: 'Luis Fonsi - Despacito ft. Daddy Yankee',
-        channel: 'Luis Fonsi',
-        views: '8.3B',
-        timestamp: '7 years ago',
-        thumbnail: 'https://img.youtube.com/vi/kJQP7kiw5Fk/maxresdefault.jpg',
-        channelAvatar: 'https://ui-avatars.com/api/?name=Luis&background=random',
       }
     ];
 
+    // YouTube লিংক বা এমবেড কোড থেকে Video ID এবং List ID বের করার ফাংশন
+    function parseYouTubeInput(input) {
+      let videoId = null;
+      let listId = null;
+      let urlStr = input;
+
+      // যদি Iframe কোড হয়, তাহলে src বের করে আনা
+      const iframeMatch = input.match(/src=["'](.*?)["']/);
+      if (iframeMatch) {
+        urlStr = iframeMatch[1];
+      }
+
+      try {
+        if (!urlStr.startsWith('http') && !urlStr.startsWith('//')) {
+          urlStr = 'https://' + urlStr;
+        } else if (urlStr.startsWith('//')) {
+          urlStr = 'https:' + urlStr;
+        }
+        
+        const url = new URL(urlStr);
+        
+        if (url.searchParams.has('v')) videoId = url.searchParams.get('v');
+        if (url.searchParams.has('list')) listId = url.searchParams.get('list');
+        
+        if (url.pathname.startsWith('/embed/')) {
+          const pathParts = url.pathname.split('/');
+          const id = pathParts[pathParts.length - 1];
+          if (id && id !== 'videoseries') {
+            videoId = id;
+          }
+        } else if (url.hostname.includes('youtu.be')) {
+          videoId = url.pathname.slice(1);
+        }
+      } catch (e) {
+        console.error("URL পার্স করতে সমস্যা হয়েছে", e);
+      }
+
+      return { videoId, listId };
+    }
+
     function App() {
-      const [videos] = useState(initialVideos);
+      // Local storage থেকে ইউজার ডেটা লোড করা
+      const [videos, setVideos] = useState(() => {
+        const saved = localStorage.getItem('ytCloneVideos');
+        return saved ? JSON.parse(saved) : initialVideos;
+      });
+
       const [currentVideo, setCurrentVideo] = useState(null);
       const [searchQuery, setSearchQuery] = useState('');
       const [isSidebarOpen, setIsSidebarOpen] = useState(true);
@@ -100,14 +124,15 @@
       const [watchHistory, setWatchHistory] = useState([]);
       const [lastWatched, setLastWatched] = useState(null);
 
-      // Miniplayer States (using absolute coordinates for better resizing)
+      // Add Video Modal States
+      const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+      const [newMediaInput, setNewMediaInput] = useState({ link: '', title: '', channel: '' });
+
+      // Miniplayer States
       const [isMiniplayer, setIsMiniplayer] = useState(false);
       const [playerRect, setPlayerRect] = useState(null); 
-      
       const [isDragging, setIsDragging] = useState(false);
       const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
-
-      // 8-Way Resize States
       const [resizeState, setResizeState] = useState({ active: false, dir: null, startX: 0, startY: 0, startLeft: 0, startTop: 0, startWidth: 0, startHeight: 0 });
 
       const [ytReady, setYtReady] = useState(window.ytApiLoaded);
@@ -126,7 +151,7 @@
         return () => window.removeEventListener('yt-api-ready', handleReady);
       }, []);
 
-      // YouTube Player Initialization (Fixed Black Screen Issue)
+      // YouTube Player Initialization (Playlist Support Added)
       useEffect(() => {
         if (!ytReady) return;
         
@@ -141,8 +166,21 @@
         const currentTimes = JSON.parse(localStorage.getItem('ytCloneTimes') || '{}');
         const startSeconds = currentTimes[currentVideo.id] || 0;
 
+        const isPlaylist = !!currentVideo.listId;
+        
+        let playerVars = { 
+            autoplay: 1, 
+            start: startSeconds,
+            enablejsapi: 1,
+            playsinline: 1
+        };
+
+        if (isPlaylist) {
+            playerVars.listType = 'playlist';
+            playerVars.list = currentVideo.listId;
+        }
+
         if (!playerRef.current) {
-            // Inject a pure div that React won't touch
             const wrapper = document.getElementById('yt-player-wrapper');
             if (wrapper && !document.getElementById('yt-player-instance')) {
                 const div = document.createElement('div');
@@ -152,15 +190,10 @@
                 playerRef.current = new window.YT.Player('yt-player-instance', {
                     height: '100%',
                     width: '100%',
-                    videoId: currentVideo.id,
-                    playerVars: { 
-                        autoplay: 1, 
-                        start: startSeconds,
-                        enablejsapi: 1,
-                        playsinline: 1
-                    },
+                    videoId: currentVideo.videoId || '', // প্লেলিস্টের ক্ষেত্রে খালি থাকতে পারে
+                    playerVars: playerVars,
                     events: {
-                        onReady: (e) => { e.target.playVideo(); }, // Force play
+                        onReady: (e) => { e.target.playVideo(); },
                         onStateChange: (e) => {
                             if (e.data === window.YT.PlayerState.PLAYING) {
                                 timeIntervalRef.current = setInterval(() => {
@@ -179,10 +212,20 @@
                 });
             }
         } else {
-            playerRef.current.loadVideoById({
-                videoId: currentVideo.id,
-                startSeconds: startSeconds
-            });
+            // Player already exists, load new video or playlist
+            if (isPlaylist) {
+                playerRef.current.loadPlaylist({
+                    list: currentVideo.listId,
+                    listType: 'playlist',
+                    index: 0,
+                    startSeconds: startSeconds
+                });
+            } else {
+                playerRef.current.loadVideoById({
+                    videoId: currentVideo.videoId,
+                    startSeconds: startSeconds
+                });
+            }
         }
 
         return () => clearInterval(timeIntervalRef.current);
@@ -212,6 +255,42 @@
         setWatchHistory(updatedHistory);
         localStorage.setItem('ytCloneHistory', JSON.stringify(updatedHistory));
         localStorage.setItem('ytCloneLastWatched', JSON.stringify(video));
+      };
+
+      // Add New Video/Playlist Handler
+      const handleAddSubmit = (e) => {
+        e.preventDefault();
+        const { videoId, listId } = parseYouTubeInput(newMediaInput.link);
+        
+        if (!videoId && !listId) {
+            alert('সঠিক ইউটিউব লিংক বা এমবেড কোড দিন।');
+            return;
+        }
+
+        const id = listId ? listId : videoId;
+        const type = listId ? 'playlist' : 'video';
+        const thumbnail = videoId 
+            ? `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg` 
+            : 'https://placehold.co/640x360/222222/FFFFFF/png?text=Playlist'; // প্লেলিস্টের জন্য প্লেসহোল্ডার যদি ভিডিও আইডি না থাকে
+
+        const newMedia = {
+            id: id,
+            videoId: videoId,
+            listId: listId,
+            type: type,
+            title: newMediaInput.title || (type === 'playlist' ? 'Custom Playlist' : 'Custom Video'),
+            channel: newMediaInput.channel || 'Added by User',
+            views: '0 views',
+            thumbnail: thumbnail,
+            channelAvatar: `https://ui-avatars.com/api/?name=${newMediaInput.channel || 'User'}&background=random`,
+        };
+
+        const updatedVideos = [newMedia, ...videos];
+        setVideos(updatedVideos);
+        localStorage.setItem('ytCloneVideos', JSON.stringify(updatedVideos));
+        
+        setIsAddModalOpen(false);
+        setNewMediaInput({ link: '', title: '', channel: '' });
       };
 
       const filteredVideos = videos.filter(video => 
@@ -264,21 +343,20 @@
                 newWidth = startWidth - dx;
                 newLeft = startLeft + dx;
             } 
-            else if (dir === 'n') {
+            if (dir.includes('n')) {
                 const newHeight = startHeight - dy;
                 const videoH = newHeight - headerHeight;
                 newWidth = videoH * (16/9);
                 newTop = startTop + dy;
                 newLeft = startLeft + (startWidth - newWidth) / 2;
             } 
-            else if (dir === 's') {
+            else if (dir.includes('s')) {
                 const newHeight = startHeight + dy;
                 const videoH = newHeight - headerHeight;
                 newWidth = videoH * (16/9);
                 newLeft = startLeft + (startWidth - newWidth) / 2;
             }
 
-            // Constraints
             if (newWidth < 250) {
                 const diff = 250 - newWidth;
                 newWidth = 250;
@@ -291,8 +369,6 @@
             }
 
             const newHeight = newWidth * (9/16) + headerHeight;
-
-            // Fix Y axis for diagonal resizes to maintain anchor
             if (dir.includes('n')) newTop = startTop + (startHeight - newHeight);
 
             setPlayerRect({ left: newLeft, top: newTop, width: newWidth, height: newHeight });
@@ -314,13 +390,14 @@
           window.removeEventListener('mousemove', handleMove);
           window.removeEventListener('mouseup', handleUp);
           window.removeEventListener('touchmove', handleMove);
+          window.removeEventListener('touchmove', handleMove, { passive: false });
           window.removeEventListener('touchend', handleUp);
         };
       }, [isDragging, resizeState, dragOffset, playerRect]);
 
       return (
-        <div className="min-h-screen flex flex-col relative overflow-hidden">
-          <header className="flex items-center justify-between px-4 py-2 sticky top-0 bg-[#0f0f0f] z-50 h-16 border-b border-white/10">
+        <div className="min-h-screen flex flex-col relative overflow-hidden bg-[#0f0f0f]">
+          <header className="flex items-center justify-between px-4 py-2 sticky top-0 bg-[#0f0f0f] z-40 h-16 border-b border-white/10">
             <div className="flex items-center gap-4">
               <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="p-2 hover:bg-white/10 rounded-full transition-colors">
                 <i className="fas fa-bars text-xl"></i>
@@ -346,7 +423,17 @@
               </div>
             </div>
 
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2 sm:gap-3">
+              {/* Add Video Button */}
+              <button 
+                onClick={() => setIsAddModalOpen(true)}
+                className="flex items-center gap-2 px-3 py-1.5 bg-white/10 hover:bg-white/20 rounded-full transition-colors border border-white/20"
+                title="ভিডিও বা প্লেলিস্ট যুক্ত করুন"
+              >
+                <i className="fas fa-plus text-sm"></i>
+                <span className="text-sm font-semibold hidden md:block">যোগ করুন</span>
+              </button>
+
               <button className="p-2 hover:bg-white/10 rounded-full hidden sm:block">
                 <i className="fas fa-bell text-xl"></i>
               </button>
@@ -370,7 +457,6 @@
               <div className={`max-w-[1600px] mx-auto p-4 flex-col lg:flex-row gap-6 ${(currentVideo && !isMiniplayer) ? 'flex' : 'absolute w-0 h-0 overflow-hidden invisible'}`}>
                 <div className="flex-1 lg:w-2/3 flex flex-col relative">
                   
-                  {/* The Video Container */}
                   {currentVideo && (
                     <div 
                       className={`${isMiniplayer ? 'fixed z-[100] flex flex-col overflow-visible visible' : 'w-full aspect-video relative'}`}
@@ -382,14 +468,16 @@
                       } : {}}
                     >
                       <div className={`w-full h-full flex flex-col relative rounded-xl overflow-hidden ${isMiniplayer ? 'bg-[#212121] shadow-2xl border border-gray-700' : 'bg-black shadow-lg'}`}>
-                        {/* Miniplayer Drag Header - Always in DOM but visually toggled */}
                         <div 
                           className={`${isMiniplayer ? 'flex' : 'hidden'} h-10 flex-shrink-0 justify-between items-center px-3 bg-[#181818] cursor-move select-none z-10 border-b border-gray-700`} 
                           onMouseDown={handleDragStart} 
                           onTouchStart={handleDragStart}
                         >
                           <div className="flex flex-col truncate pr-2 w-[75%]">
-                            <span className="text-sm font-bold truncate text-white">{currentVideo.title}</span>
+                            <span className="text-sm font-bold truncate text-white">
+                                {currentVideo.type === 'playlist' && <i className="fas fa-list mr-2 text-gray-400"></i>}
+                                {currentVideo.title}
+                            </span>
                           </div>
                           <div className="flex gap-4 text-gray-400 items-center">
                             <button onClick={() => setIsMiniplayer(false)} className="hover:text-white" title="Expand">
@@ -401,14 +489,12 @@
                           </div>
                         </div>
 
-                        {/* Wrapper for the YouTube API Injection */}
                         <div className="w-full flex-1 relative bg-black pointer-events-auto overflow-hidden">
                           {(isDragging || resizeState.active) && <div className="absolute inset-0 z-10 bg-transparent"></div>}
                           <div id="yt-player-wrapper" className="w-full h-full"></div>
                         </div>
                       </div>
 
-                      {/* 8-Way Resize Handles - Placed on the absolute edges of the entire card */}
                       {isMiniplayer && (
                         <>
                           <div className="absolute -top-2 left-2 right-2 h-4 cursor-n-resize z-20" onMouseDown={(e) => handleResizeStart(e, 'n')} onTouchStart={(e) => handleResizeStart(e, 'n')} />
@@ -424,15 +510,17 @@
                     </div>
                   )}
 
-                  {/* Video Details */}
                   <div className={`${isMiniplayer ? 'hidden' : 'block'}`}>
-                    <h1 className="text-xl md:text-2xl font-bold mt-4 mb-2">{currentVideo?.title}</h1>
+                    <h1 className="text-xl md:text-2xl font-bold mt-4 mb-2">
+                        {currentVideo?.type === 'playlist' && <span className="bg-white/10 text-xs px-2 py-1 rounded mr-2 align-middle border border-white/20">প্লেলিস্ট</span>}
+                        {currentVideo?.title}
+                    </h1>
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                       <div className="flex items-center gap-3">
                         <img src={currentVideo?.channelAvatar} alt={currentVideo?.channel} className="w-10 h-10 rounded-full" />
                         <div>
                           <h3 className="font-bold text-sm">{currentVideo?.channel}</h3>
-                          <p className="text-xs text-gray-400">১.২ মি. সাবস্ক্রাইবার</p>
+                          <p className="text-xs text-gray-400">সাবস্ক্রাইবার অজানা</p>
                         </div>
                         <button className="bg-white text-black px-4 py-2 rounded-full font-bold ml-2 hover:bg-gray-200 transition">সাবস্ক্রাইব</button>
                       </div>
@@ -445,13 +533,17 @@
                   </div>
                 </div>
 
-                {/* Recommendations */}
                 <div className={`lg:w-1/3 w-full flex flex-col gap-3 ${isMiniplayer ? 'hidden' : 'flex'}`}>
                   <h3 className="font-bold text-lg mb-2">আপনার জন্য প্রস্তাবিত</h3>
                   {videos.filter(v => v?.id !== currentVideo?.id).map(video => (
                     <div key={video.id} className="flex gap-2 cursor-pointer group" onClick={() => playVideo(video)}>
-                      <div className="w-40 h-24 flex-shrink-0 relative rounded-lg overflow-hidden">
+                      <div className="w-40 h-24 flex-shrink-0 relative rounded-lg overflow-hidden bg-gray-900 border border-white/10">
                         <img src={video.thumbnail} alt={video.title} className="w-full h-full object-cover group-hover:scale-105 transition duration-300" />
+                        {video.type === 'playlist' && (
+                            <div className="absolute bottom-1 right-1 bg-black/80 text-xs px-1.5 py-0.5 rounded flex items-center gap-1">
+                                <i className="fas fa-list text-[10px]"></i> Playlist
+                            </div>
+                        )}
                       </div>
                       <div className="flex flex-col">
                         <h4 className="text-sm font-semibold line-clamp-2 group-hover:text-blue-400">{video.title}</h4>
@@ -468,7 +560,7 @@
                 {activeTab === 'home' && lastWatched && !searchQuery && (
                   <div className="mb-8 bg-gradient-to-r from-blue-900/40 to-purple-900/40 border border-white/10 rounded-2xl p-4 flex flex-col sm:flex-row items-center justify-between gap-4 shadow-xl">
                     <div className="flex items-center gap-4 w-full sm:w-auto">
-                      <div className="w-32 aspect-video rounded-lg overflow-hidden flex-shrink-0 relative cursor-pointer" onClick={() => playVideo(lastWatched)}>
+                      <div className="w-32 aspect-video rounded-lg overflow-hidden flex-shrink-0 relative cursor-pointer border border-white/10 bg-gray-900" onClick={() => playVideo(lastWatched)}>
                         <img src={lastWatched.thumbnail} alt="Resume" className="w-full h-full object-cover" />
                         <div className="absolute inset-0 bg-black/40 flex items-center justify-center hover:bg-black/20">
                           <i className="fas fa-play-circle text-3xl text-white"></i>
@@ -479,6 +571,9 @@
                           <i className="fas fa-history"></i> রিজিউম (যেখান থেকে শেষ করেছিলেন)
                         </h3>
                         <h4 className="font-bold line-clamp-1">{lastWatched.title}</h4>
+                        <p className="text-xs text-gray-400 mt-0.5 flex items-center gap-1">
+                          {lastWatched.type === 'playlist' && <i className="fas fa-list"></i>} {lastWatched.type === 'playlist' ? 'Playlist' : 'Video'}
+                        </p>
                       </div>
                     </div>
                     <button onClick={() => playVideo(lastWatched)} className="bg-white text-black px-6 py-2 rounded-full font-bold hover:bg-gray-200 transition">
@@ -488,30 +583,89 @@
                 )}
 
                 <h2 className="text-xl font-bold mb-6">
-                  {activeTab === 'history' ? 'আপনার দেখার ইতিহাস' : (searchQuery ? `"${searchQuery}" এর ফলাফল` : 'প্রস্তাবিত ভিডিও')}
+                  {activeTab === 'history' ? 'আপনার দেখার ইতিহাস' : (searchQuery ? `"${searchQuery}" এর ফলাফল` : 'প্রস্তাবিত ভিডিও ও প্লেলিস্ট')}
                 </h2>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-x-4 gap-y-8">
                   {(activeTab === 'history' ? watchHistory : filteredVideos).map((video, index) => (
                     <div key={`${video.id}-${index}`} className="flex flex-col cursor-pointer group" onClick={() => playVideo(video)}>
-                      <div className="w-full aspect-video relative rounded-xl overflow-hidden mb-3">
+                      <div className="w-full aspect-video relative rounded-xl overflow-hidden mb-3 border border-white/10 bg-gray-900">
                         <img src={video.thumbnail} alt={video.title} className="w-full h-full object-cover group-hover:scale-105 transition duration-300" />
+                        {video.type === 'playlist' && (
+                            <div className="absolute bottom-1.5 right-1.5 bg-black/80 text-xs px-2 py-0.5 rounded font-medium flex items-center gap-1">
+                                <i className="fas fa-list"></i> Playlist
+                            </div>
+                        )}
                       </div>
                       <div className="flex gap-3 pr-2">
                         <img src={video.channelAvatar} alt={video.channel} className="w-9 h-9 rounded-full mt-1 flex-shrink-0" />
                         <div>
                           <h3 className="text-sm font-semibold line-clamp-2 group-hover:text-blue-400">{video.title}</h3>
                           <p className="text-sm text-gray-400 mt-1 hover:text-white transition">{video.channel}</p>
-                          <p className="text-sm text-gray-400">{video.views} views</p>
+                          <p className="text-sm text-gray-400">{video.views}</p>
                         </div>
                       </div>
                     </div>
                   ))}
                 </div>
               </div>
-
             </main>
           </div>
+
+          {/* ADD VIDEO / PLAYLIST MODAL */}
+          {isAddModalOpen && (
+            <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 p-4">
+                <div className="bg-[#212121] rounded-2xl w-full max-w-lg border border-gray-700 shadow-2xl">
+                    <div className="flex justify-between items-center p-4 border-b border-gray-700">
+                        <h2 className="text-xl font-bold">ভিডিও বা প্লেলিস্ট যোগ করুন</h2>
+                        <button onClick={() => setIsAddModalOpen(false)} className="text-gray-400 hover:text-white">
+                            <i className="fas fa-times text-xl"></i>
+                        </button>
+                    </div>
+                    <form onSubmit={handleAddSubmit} className="p-4 flex flex-col gap-4">
+                        <div>
+                            <label className="block text-sm text-gray-400 mb-1">ইউটিউব লিংক বা এমবেড কোড (বাধ্যতামূলক)</label>
+                            <input 
+                                type="text" 
+                                required
+                                placeholder='যেমন: https://youtube.com/watch?v=... বা <iframe src="...">' 
+                                className="w-full bg-[#121212] border border-gray-600 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-blue-500"
+                                value={newMediaInput.link}
+                                onChange={(e) => setNewMediaInput({...newMediaInput, link: e.target.value})}
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-sm text-gray-400 mb-1">ভিডিও/প্লেলিস্টের নাম (ঐচ্ছিক)</label>
+                            <input 
+                                type="text" 
+                                placeholder="নাম দিন" 
+                                className="w-full bg-[#121212] border border-gray-600 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-blue-500"
+                                value={newMediaInput.title}
+                                onChange={(e) => setNewMediaInput({...newMediaInput, title: e.target.value})}
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-sm text-gray-400 mb-1">চ্যানেলের নাম (ঐচ্ছিক)</label>
+                            <input 
+                                type="text" 
+                                placeholder="চ্যানেলের নাম" 
+                                className="w-full bg-[#121212] border border-gray-600 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-blue-500"
+                                value={newMediaInput.channel}
+                                onChange={(e) => setNewMediaInput({...newMediaInput, channel: e.target.value})}
+                            />
+                        </div>
+                        <div className="flex justify-end gap-3 mt-4">
+                            <button type="button" onClick={() => setIsAddModalOpen(false)} className="px-4 py-2 rounded-full font-bold hover:bg-white/10">
+                                বাতিল
+                            </button>
+                            <button type="submit" className="bg-blue-600 hover:bg-blue-500 text-white px-5 py-2 rounded-full font-bold transition">
+                                যোগ করুন
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+          )}
         </div>
       );
     }
