@@ -70,23 +70,22 @@
       }
     ];
 
-    // YouTube লিংক বা এমবেড কোড থেকে Video ID, List ID এবং Title বের করার ফাংশন
     function parseYouTubeInput(input) {
       let videoId = null;
       let listId = null;
       let title = '';
       
-      // &amp; কে & দিয়ে রিপ্লেস করা (আপনার দেওয়া প্লেলিস্ট কোডের জন্য)
       let urlStr = input.replace(/&amp;/g, '&');
 
-      // Iframe কোড থেকে src এবং title বের করে আনা
       const iframeMatch = urlStr.match(/src=["'](.*?)["']/);
-      if (iframeMatch) {
-        urlStr = iframeMatch[1];
-      }
+      if (iframeMatch) urlStr = iframeMatch[1];
+      
       const titleMatch = input.match(/title=["'](.*?)["']/);
-      if (titleMatch) {
-        title = titleMatch[1];
+      if (titleMatch) title = titleMatch[1];
+      
+      // ইগনোর ডিফল্ট টাইটেল যাতে অটো-ফেচ কাজ করে
+      if(title.toLowerCase() === 'youtube video player') {
+          title = ''; 
       }
 
       try {
@@ -97,21 +96,18 @@
         }
         
         const url = new URL(urlStr);
-        
         if (url.searchParams.has('v')) videoId = url.searchParams.get('v');
         if (url.searchParams.has('list')) listId = url.searchParams.get('list');
         
         if (url.pathname.startsWith('/embed/')) {
           const pathParts = url.pathname.split('/');
           const id = pathParts[pathParts.length - 1];
-          if (id && id !== 'videoseries') {
-            videoId = id;
-          }
+          if (id && id !== 'videoseries') videoId = id;
         } else if (url.hostname.includes('youtu.be')) {
           videoId = url.pathname.slice(1);
         }
       } catch (e) {
-        console.error("URL পার্স করতে সমস্যা হয়েছে", e);
+        console.error("URL Error", e);
       }
 
       return { videoId, listId, title };
@@ -130,15 +126,16 @@
       const [watchHistory, setWatchHistory] = useState([]);
       const [lastWatched, setLastWatched] = useState(null);
 
-      // Modals State
+      // Custom Alert & Confirm States
+      const [alertState, setAlertState] = useState({ isOpen: false, message: '' });
+      const [confirmState, setConfirmState] = useState({ isOpen: false, message: '', targetId: null });
+
       const [isAddModalOpen, setIsAddModalOpen] = useState(false);
       const [newMediaInput, setNewMediaInput] = useState({ link: '', title: '', channel: '' });
-      
       const [isCreateListModalOpen, setIsCreateListModalOpen] = useState(false);
       const [newListTitle, setNewListTitle] = useState('');
       const [selectedVideoIds, setSelectedVideoIds] = useState([]);
 
-      // Miniplayer States
       const [isMiniplayer, setIsMiniplayer] = useState(false);
       const [playerRect, setPlayerRect] = useState(null); 
       const [isDragging, setIsDragging] = useState(false);
@@ -149,10 +146,12 @@
       const playerRef = useRef(null);
       const timeIntervalRef = useRef(null);
 
+      // Current Video Data helper to always show updated title
+      const currentVideoData = currentVideo ? (videos.find(v => v.id === currentVideo.id) || currentVideo) : null;
+
       useEffect(() => {
         const savedHistory = localStorage.getItem('ytCloneHistory');
         const savedLastWatched = localStorage.getItem('ytCloneLastWatched');
-        
         if (savedHistory) setWatchHistory(JSON.parse(savedHistory));
         if (savedLastWatched) setLastWatched(JSON.parse(savedLastWatched));
 
@@ -161,7 +160,6 @@
         return () => window.removeEventListener('yt-api-ready', handleReady);
       }, []);
 
-      // YouTube Player Initialization
       useEffect(() => {
         if (!ytReady) return;
         
@@ -179,12 +177,7 @@
         const isPlaylist = currentVideo.type === 'playlist';
         const isLocalPlaylist = currentVideo.type === 'local_playlist';
         
-        let playerVars = { 
-            autoplay: 1, 
-            start: startSeconds,
-            enablejsapi: 1,
-            playsinline: 1
-        };
+        let playerVars = { autoplay: 1, start: startSeconds, enablejsapi: 1, playsinline: 1 };
 
         if (isPlaylist) {
             playerVars.listType = 'playlist';
@@ -201,14 +194,30 @@
                 wrapper.appendChild(div);
 
                 playerRef.current = new window.YT.Player('yt-player-instance', {
-                    height: '100%',
-                    width: '100%',
+                    height: '100%', width: '100%',
                     videoId: isLocalPlaylist ? currentVideo.videoIds[0] : (currentVideo.videoId || ''),
                     playerVars: playerVars,
                     events: {
                         onReady: (e) => { e.target.playVideo(); },
                         onStateChange: (e) => {
                             if (e.data === window.YT.PlayerState.PLAYING) {
+                                
+                                // --- AUTO TITLE FETCH LOGIC ---
+                                const vData = e.target.getVideoData();
+                                if (vData && vData.title) {
+                                    setVideos(prev => {
+                                        const updated = prev.map(v => {
+                                            if (v.id === currentVideo.id && (v.title === 'YouTube Video' || v.title === 'YouTube Playlist' || v.title === 'Custom Video' || v.title === '')) {
+                                                return { ...v, title: vData.title };
+                                            }
+                                            return v;
+                                        });
+                                        localStorage.setItem('ytCloneVideos', JSON.stringify(updated));
+                                        return updated;
+                                    });
+                                }
+                                // ------------------------------
+
                                 timeIntervalRef.current = setInterval(() => {
                                     if (playerRef.current && playerRef.current.getCurrentTime) {
                                         const time = Math.floor(playerRef.current.getCurrentTime());
@@ -226,23 +235,11 @@
             }
         } else {
             if (isPlaylist) {
-                playerRef.current.loadPlaylist({
-                    list: currentVideo.listId,
-                    listType: 'playlist',
-                    index: 0,
-                    startSeconds: startSeconds
-                });
+                playerRef.current.loadPlaylist({ list: currentVideo.listId, listType: 'playlist', index: 0, startSeconds });
             } else if (isLocalPlaylist) {
-                playerRef.current.loadPlaylist({
-                    playlist: currentVideo.videoIds,
-                    index: 0,
-                    startSeconds: startSeconds
-                });
+                playerRef.current.loadPlaylist({ playlist: currentVideo.videoIds, index: 0, startSeconds });
             } else {
-                playerRef.current.loadVideoById({
-                    videoId: currentVideo.videoId,
-                    startSeconds: startSeconds
-                });
+                playerRef.current.loadVideoById({ videoId: currentVideo.videoId, startSeconds });
             }
         }
 
@@ -252,14 +249,8 @@
       const activateMiniplayer = () => {
         if (!playerRect) {
             const w = 384;
-            const headerHeight = 40;
-            const h = w * (9/16) + headerHeight;
-            setPlayerRect({
-                left: window.innerWidth - w - 24,
-                top: window.innerHeight - h - 24,
-                width: w,
-                height: h
-            });
+            const h = w * (9/16) + 40;
+            setPlayerRect({ left: window.innerWidth - w - 24, top: window.innerHeight - h - 24, width: w, height: h });
         }
         setIsMiniplayer(true);
       };
@@ -268,31 +259,34 @@
         setCurrentVideo(video);
         setLastWatched(video);
         setIsMiniplayer(false); 
-        
         const updatedHistory = [video, ...watchHistory.filter(v => v.id !== video.id)].slice(0, 20);
         setWatchHistory(updatedHistory);
         localStorage.setItem('ytCloneHistory', JSON.stringify(updatedHistory));
         localStorage.setItem('ytCloneLastWatched', JSON.stringify(video));
       };
 
-      // Delete Media
       const deleteMedia = (e, id) => {
-        e.stopPropagation(); // ক্লিক করলে যেন ভিডিও প্লে না হয়ে যায়
-        if(window.confirm('আপনি কি নিশ্চিত যে এটি মুছে ফেলতে চান?')) {
-            const updatedVideos = videos.filter(v => v.id !== id);
-            setVideos(updatedVideos);
-            localStorage.setItem('ytCloneVideos', JSON.stringify(updatedVideos));
-            if(currentVideo?.id === id) setCurrentVideo(null);
-        }
+        e.stopPropagation();
+        setConfirmState({ isOpen: true, message: 'আপনি কি নিশ্চিত যে এটি ডিলিট করতে চান?', targetId: id });
       };
 
-      // Add New Video/Playlist Handler
+      const executeDelete = () => {
+        const updatedVideos = videos.filter(v => v.id !== confirmState.targetId);
+        setVideos(updatedVideos);
+        localStorage.setItem('ytCloneVideos', JSON.stringify(updatedVideos));
+        if(currentVideo?.id === confirmState.targetId) {
+            setCurrentVideo(null);
+            setIsMiniplayer(false);
+        }
+        setConfirmState({ isOpen: false, message: '', targetId: null });
+      };
+
       const handleAddSubmit = (e) => {
         e.preventDefault();
         const { videoId, listId, title: extractedTitle } = parseYouTubeInput(newMediaInput.link);
         
         if (!videoId && !listId) {
-            alert('সঠিক ইউটিউব লিংক বা এমবেড কোড দিন।');
+            setAlertState({ isOpen: true, message: 'দয়া করে একটি সঠিক ইউটিউব লিংক বা এমবেড কোড দিন।' });
             return;
         }
 
@@ -300,67 +294,48 @@
         const type = listId ? 'playlist' : 'video';
         
         let finalTitle = newMediaInput.title || extractedTitle;
-        if (!finalTitle) {
-            finalTitle = type === 'playlist' ? 'YouTube Playlist' : 'YouTube Video';
-        }
+        if (!finalTitle) finalTitle = type === 'playlist' ? 'YouTube Playlist' : 'YouTube Video';
 
-        const thumbnail = videoId 
-            ? `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg` 
-            : 'https://placehold.co/640x360/222222/FFFFFF/png?text=YouTube+Playlist';
+        const thumbnail = videoId ? `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg` : 'https://placehold.co/640x360/222222/FFFFFF/png?text=YouTube+Playlist';
 
         const newMedia = {
-            id: id,
-            videoId: videoId,
-            listId: listId,
-            type: type,
-            title: finalTitle,
-            channel: newMediaInput.channel || 'Added by User',
-            views: '0 views',
-            thumbnail: thumbnail,
+            id: id, videoId, listId, type, title: finalTitle,
+            channel: newMediaInput.channel || 'Added by User', views: '0 views', thumbnail,
             channelAvatar: `https://ui-avatars.com/api/?name=${newMediaInput.channel || 'User'}&background=random`,
         };
 
         const updatedVideos = [newMedia, ...videos];
         setVideos(updatedVideos);
         localStorage.setItem('ytCloneVideos', JSON.stringify(updatedVideos));
-        
         setIsAddModalOpen(false);
         setNewMediaInput({ link: '', title: '', channel: '' });
       };
 
-      // Create Local Playlist Handler
       const handleCreatePlaylist = (e) => {
         e.preventDefault();
-        if(selectedVideoIds.length === 0) return alert('অন্তত একটি ভিডিও নির্বাচন করুন');
+        if(selectedVideoIds.length === 0) {
+            setAlertState({ isOpen: true, message: 'অন্তত একটি ভিডিও নির্বাচন করুন।' });
+            return;
+        }
         
         const firstVid = videos.find(v => v.id === selectedVideoIds[0]);
-        
         const newPlaylist = {
-            id: 'local-list-' + Date.now(),
-            type: 'local_playlist',
-            title: newListTitle || 'My Playlist',
-            videoIds: selectedVideoIds,
-            thumbnail: firstVid ? firstVid.thumbnail : 'https://placehold.co/640x360/222222/FFFFFF/png?text=Playlist',
-            channel: 'Created by You',
-            channelAvatar: 'https://ui-avatars.com/api/?name=User&background=random',
+            id: 'local-list-' + Date.now(), type: 'local_playlist', title: newListTitle || 'My Playlist',
+            videoIds: selectedVideoIds, thumbnail: firstVid ? firstVid.thumbnail : 'https://placehold.co/640x360/222222/FFFFFF/png?text=Playlist',
+            channel: 'Created by You', channelAvatar: 'https://ui-avatars.com/api/?name=User&background=random',
             views: selectedVideoIds.length + ' videos'
         };
         
         const updated = [newPlaylist, ...videos];
         setVideos(updated);
         localStorage.setItem('ytCloneVideos', JSON.stringify(updated));
-        
         setIsCreateListModalOpen(false);
         setNewListTitle('');
         setSelectedVideoIds([]);
       };
 
-      const filteredVideos = videos.filter(video => 
-        video.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        video.channel.toLowerCase().includes(searchQuery.toLowerCase())
-      );
+      const filteredVideos = videos.filter(video => video.title.toLowerCase().includes(searchQuery.toLowerCase()) || video.channel.toLowerCase().includes(searchQuery.toLowerCase()));
 
-      // --- Drag Logic ---
       const handleDragStart = (e) => {
         if (e.target.closest('button')) return;
         setIsDragging(true);
@@ -369,17 +344,11 @@
         setDragOffset({ x: clientX - playerRect.left, y: clientY - playerRect.top });
       };
 
-      // --- 8-Way Resize Logic ---
       const handleResizeStart = (e, dir) => {
-        e.stopPropagation();
-        e.preventDefault();
+        e.stopPropagation(); e.preventDefault();
         const clientX = e.type.includes('mouse') ? e.clientX : e.touches[0].clientX;
         const clientY = e.type.includes('mouse') ? e.clientY : e.touches[0].clientY;
-        setResizeState({
-            active: true, dir, startX: clientX, startY: clientY,
-            startLeft: playerRect.left, startTop: playerRect.top,
-            startWidth: playerRect.width, startHeight: playerRect.height
-        });
+        setResizeState({ active: true, dir, startX: clientX, startY: clientY, startLeft: playerRect.left, startTop: playerRect.top, startWidth: playerRect.width, startHeight: playerRect.height });
       };
 
       useEffect(() => {
@@ -389,75 +358,49 @@
           
           if (isDragging && playerRect) {
             setPlayerRect(prev => ({ ...prev, left: clientX - dragOffset.x, top: clientY - dragOffset.y }));
-          } 
-          else if (resizeState.active) {
-            const dx = clientX - resizeState.startX;
-            const dy = clientY - resizeState.startY;
+          } else if (resizeState.active) {
+            const dx = clientX - resizeState.startX, dy = clientY - resizeState.startY;
             let { startLeft, startTop, startWidth, startHeight, dir } = resizeState;
-            
-            let newWidth = startWidth;
-            let newLeft = startLeft;
-            let newTop = startTop;
-            const headerHeight = 40;
+            let newWidth = startWidth, newLeft = startLeft, newTop = startTop;
 
             if (dir.includes('e')) newWidth = startWidth + dx;
-            else if (dir.includes('w')) {
-                newWidth = startWidth - dx;
-                newLeft = startLeft + dx;
-            } 
+            else if (dir.includes('w')) { newWidth = startWidth - dx; newLeft = startLeft + dx; } 
+            
             if (dir.includes('n')) {
-                const newHeight = startHeight - dy;
-                const videoH = newHeight - headerHeight;
+                const videoH = (startHeight - dy) - 40;
                 newWidth = videoH * (16/9);
                 newTop = startTop + dy;
                 newLeft = startLeft + (startWidth - newWidth) / 2;
-            } 
-            else if (dir.includes('s')) {
-                const newHeight = startHeight + dy;
-                const videoH = newHeight - headerHeight;
+            } else if (dir.includes('s')) {
+                const videoH = (startHeight + dy) - 40;
                 newWidth = videoH * (16/9);
                 newLeft = startLeft + (startWidth - newWidth) / 2;
             }
 
-            if (newWidth < 250) {
-                const diff = 250 - newWidth;
-                newWidth = 250;
-                if (dir.includes('w')) newLeft -= diff;
-            }
-            if (newWidth > 800) {
-                const diff = newWidth - 800;
-                newWidth = 800;
-                if (dir.includes('w')) newLeft += diff;
-            }
+            if (newWidth < 250) { newWidth = 250; if (dir.includes('w')) newLeft -= (250 - newWidth); }
+            if (newWidth > 800) { newWidth = 800; if (dir.includes('w')) newLeft += (newWidth - 800); }
 
-            const newHeight = newWidth * (9/16) + headerHeight;
+            const newHeight = newWidth * (9/16) + 40;
             if (dir.includes('n')) newTop = startTop + (startHeight - newHeight);
-
             setPlayerRect({ left: newLeft, top: newTop, width: newWidth, height: newHeight });
           }
         };
 
-        const handleUp = () => {
-          setIsDragging(false);
-          setResizeState(prev => ({ ...prev, active: false }));
-        };
+        const handleUp = () => { setIsDragging(false); setResizeState(prev => ({ ...prev, active: false })); };
 
         if (isDragging || resizeState.active) {
-          window.addEventListener('mousemove', handleMove);
-          window.addEventListener('mouseup', handleUp);
-          window.addEventListener('touchmove', handleMove, { passive: false });
-          window.addEventListener('touchend', handleUp);
+          window.addEventListener('mousemove', handleMove); window.addEventListener('mouseup', handleUp);
+          window.addEventListener('touchmove', handleMove, { passive: false }); window.addEventListener('touchend', handleUp);
         }
         return () => {
-          window.removeEventListener('mousemove', handleMove);
-          window.removeEventListener('mouseup', handleUp);
-          window.removeEventListener('touchmove', handleMove);
-          window.removeEventListener('touchend', handleUp);
+          window.removeEventListener('mousemove', handleMove); window.removeEventListener('mouseup', handleUp);
+          window.removeEventListener('touchmove', handleMove); window.removeEventListener('touchend', handleUp);
         };
       }, [isDragging, resizeState, dragOffset, playerRect]);
 
       return (
         <div className="min-h-screen flex flex-col relative overflow-hidden bg-[#0f0f0f]">
+          {/* Header */}
           <header className="flex items-center justify-between px-4 py-2 sticky top-0 bg-[#0f0f0f] z-40 h-16 border-b border-white/10">
             <div className="flex items-center gap-4">
               <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="p-2 hover:bg-white/10 rounded-full transition-colors">
@@ -485,24 +428,11 @@
             </div>
 
             <div className="flex items-center gap-2 sm:gap-3">
-              {/* Create Custom Playlist Button */}
-              <button 
-                onClick={() => setIsCreateListModalOpen(true)}
-                className="flex items-center gap-2 px-3 py-1.5 bg-blue-600/20 hover:bg-blue-600/40 text-blue-400 rounded-full transition-colors border border-blue-500/30"
-                title="আপনার সেভ করা ভিডিও দিয়ে প্লেলিস্ট বানান"
-              >
-                <i className="fas fa-folder-plus text-sm"></i>
-                <span className="text-sm font-semibold hidden md:block">প্লেলিস্ট বানান</span>
+              <button onClick={() => setIsCreateListModalOpen(true)} className="flex items-center gap-2 px-3 py-1.5 bg-blue-600/20 hover:bg-blue-600/40 text-blue-400 rounded-full transition-colors border border-blue-500/30">
+                <i className="fas fa-folder-plus text-sm"></i><span className="text-sm font-semibold hidden md:block">প্লেলিস্ট বানান</span>
               </button>
-
-              {/* Add Video Button */}
-              <button 
-                onClick={() => setIsAddModalOpen(true)}
-                className="flex items-center gap-2 px-3 py-1.5 bg-white/10 hover:bg-white/20 rounded-full transition-colors border border-white/20"
-                title="নতুন ভিডিও বা প্লেলিস্ট যুক্ত করুন"
-              >
-                <i className="fas fa-plus text-sm"></i>
-                <span className="text-sm font-semibold hidden md:block">যোগ করুন</span>
+              <button onClick={() => setIsAddModalOpen(true)} className="flex items-center gap-2 px-3 py-1.5 bg-white/10 hover:bg-white/20 rounded-full transition-colors border border-white/20">
+                <i className="fas fa-plus text-sm"></i><span className="text-sm font-semibold hidden md:block">যোগ করুন</span>
               </button>
             </div>
           </header>
@@ -517,39 +447,25 @@
 
             <main className="flex-1 overflow-y-auto bg-[#0f0f0f] relative">
               
-              {/* --- PERSISTENT VIDEO PLAYER VIEW --- */}
+              {/* PERSISTENT VIDEO PLAYER VIEW */}
               <div className={`max-w-[1600px] mx-auto p-4 flex-col lg:flex-row gap-6 ${(currentVideo && !isMiniplayer) ? 'flex' : 'absolute w-0 h-0 overflow-hidden invisible'}`}>
                 <div className="flex-1 lg:w-2/3 flex flex-col relative">
-                  
                   {currentVideo && (
                     <div 
                       className={`${isMiniplayer ? 'fixed z-[100] flex flex-col overflow-visible visible' : 'w-full aspect-video relative'}`}
-                      style={isMiniplayer && playerRect ? {
-                        left: `${playerRect.left}px`,
-                        top: `${playerRect.top}px`,
-                        width: `${playerRect.width}px`,
-                        height: `${playerRect.height}px`,
-                      } : {}}
+                      style={isMiniplayer && playerRect ? { left: `${playerRect.left}px`, top: `${playerRect.top}px`, width: `${playerRect.width}px`, height: `${playerRect.height}px` } : {}}
                     >
                       <div className={`w-full h-full flex flex-col relative rounded-xl overflow-hidden ${isMiniplayer ? 'bg-[#212121] shadow-2xl border border-gray-700' : 'bg-black shadow-lg'}`}>
-                        <div 
-                          className={`${isMiniplayer ? 'flex' : 'hidden'} h-10 flex-shrink-0 justify-between items-center px-3 bg-[#181818] cursor-move select-none z-10 border-b border-gray-700`} 
-                          onMouseDown={handleDragStart} 
-                          onTouchStart={handleDragStart}
-                        >
+                        <div className={`${isMiniplayer ? 'flex' : 'hidden'} h-10 flex-shrink-0 justify-between items-center px-3 bg-[#181818] cursor-move select-none z-10 border-b border-gray-700`} onMouseDown={handleDragStart} onTouchStart={handleDragStart}>
                           <div className="flex flex-col truncate pr-2 w-[75%]">
                             <span className="text-sm font-bold truncate text-white">
-                                {currentVideo.type.includes('playlist') && <i className="fas fa-list mr-2 text-gray-400"></i>}
-                                {currentVideo.title}
+                                {currentVideoData?.type?.includes('playlist') && <i className="fas fa-list mr-2 text-gray-400"></i>}
+                                {currentVideoData?.title}
                             </span>
                           </div>
                           <div className="flex gap-4 text-gray-400 items-center">
-                            <button onClick={() => setIsMiniplayer(false)} className="hover:text-white" title="Expand">
-                              <i className="fas fa-expand-alt"></i>
-                            </button>
-                            <button onClick={() => { setCurrentVideo(null); setIsMiniplayer(false); }} className="hover:text-white" title="Close">
-                              <i className="fas fa-times text-lg"></i>
-                            </button>
+                            <button onClick={() => setIsMiniplayer(false)} className="hover:text-white" title="Expand"><i className="fas fa-expand-alt"></i></button>
+                            <button onClick={() => { setCurrentVideo(null); setIsMiniplayer(false); }} className="hover:text-white" title="Close"><i className="fas fa-times text-lg"></i></button>
                           </div>
                         </div>
 
@@ -559,6 +475,7 @@
                         </div>
                       </div>
 
+                      {/* 8-Way Resize Handles */}
                       {isMiniplayer && (
                         <>
                           <div className="absolute -top-2 left-2 right-2 h-4 cursor-n-resize z-20" onMouseDown={(e) => handleResizeStart(e, 'n')} onTouchStart={(e) => handleResizeStart(e, 'n')} />
@@ -576,14 +493,14 @@
 
                   <div className={`${isMiniplayer ? 'hidden' : 'block'}`}>
                     <h1 className="text-xl md:text-2xl font-bold mt-4 mb-2">
-                        {currentVideo?.type.includes('playlist') && <span className="bg-white/10 text-xs px-2 py-1 rounded mr-2 align-middle border border-white/20">প্লেলিস্ট</span>}
-                        {currentVideo?.title}
+                        {currentVideoData?.type?.includes('playlist') && <span className="bg-white/10 text-xs px-2 py-1 rounded mr-2 align-middle border border-white/20">প্লেলিস্ট</span>}
+                        {currentVideoData?.title}
                     </h1>
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                       <div className="flex items-center gap-3">
-                        <img src={currentVideo?.channelAvatar} alt={currentVideo?.channel} className="w-10 h-10 rounded-full" />
+                        <img src={currentVideoData?.channelAvatar} alt={currentVideoData?.channel} className="w-10 h-10 rounded-full" />
                         <div>
-                          <h3 className="font-bold text-sm">{currentVideo?.channel}</h3>
+                          <h3 className="font-bold text-sm">{currentVideoData?.channel}</h3>
                           <p className="text-xs text-gray-400">সাবস্ক্রাইবার অজানা</p>
                         </div>
                         <button className="bg-white text-black px-4 py-2 rounded-full font-bold ml-2 hover:bg-gray-200 transition">সাবস্ক্রাইব</button>
@@ -618,7 +535,7 @@
                 </div>
               </div>
 
-              {/* --- HOME / GRID VIEW --- */}
+              {/* HOME / GRID VIEW */}
               <div className={`p-4 sm:p-6 lg:p-8 max-w-[1800px] mx-auto ${(!currentVideo || isMiniplayer) ? 'block' : 'hidden'}`}>
                 
                 {activeTab === 'home' && lastWatched && !searchQuery && (
@@ -653,8 +570,6 @@
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-x-4 gap-y-8">
                   {(activeTab === 'history' ? watchHistory : filteredVideos).map((video, index) => (
                     <div key={`${video.id}-${index}`} className="flex flex-col cursor-pointer group relative" onClick={() => playVideo(video)}>
-                      
-                      {/* Delete Button (Appears on Hover) */}
                       <button 
                         onClick={(e) => deleteMedia(e, video.id)}
                         className="absolute top-2 right-2 bg-black/80 hover:bg-red-600 text-white w-8 h-8 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition z-20 shadow-lg"
@@ -662,7 +577,6 @@
                       >
                         <i className="fas fa-trash text-sm"></i>
                       </button>
-
                       <div className="w-full aspect-video relative rounded-xl overflow-hidden mb-3 border border-white/10 bg-gray-900">
                         <img src={video.thumbnail} alt={video.title} className="w-full h-full object-cover group-hover:scale-105 transition duration-300" />
                         {video.type.includes('playlist') && (
@@ -686,55 +600,67 @@
             </main>
           </div>
 
-          {/* ADD VIDEO / PLAYLIST MODAL */}
+          {/* CUSTOM ALERT MODAL */}
+          {alertState.isOpen && (
+            <div className="fixed inset-0 z-[300] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm transition-opacity">
+                <div className="bg-[#212121] rounded-2xl w-full max-w-sm border border-gray-700 shadow-2xl p-6 text-center transform transition-all scale-100">
+                    <div className="w-16 h-16 bg-red-500/10 rounded-full flex items-center justify-center mx-auto mb-4 border border-red-500/20">
+                        <i className="fas fa-exclamation-triangle text-2xl text-red-500"></i>
+                    </div>
+                    <h2 className="text-xl font-bold mb-2">সতর্কতা</h2>
+                    <p className="text-gray-400 mb-6">{alertState.message}</p>
+                    <button onClick={() => setAlertState({isOpen: false, message: ''})} className="bg-blue-600 hover:bg-blue-500 text-white px-6 py-2.5 rounded-full font-bold transition w-full">
+                        ঠিক আছে
+                    </button>
+                </div>
+            </div>
+          )}
+
+          {/* CUSTOM CONFIRM MODAL */}
+          {confirmState.isOpen && (
+            <div className="fixed inset-0 z-[300] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm transition-opacity">
+                <div className="bg-[#212121] rounded-2xl w-full max-w-sm border border-gray-700 shadow-2xl p-6 text-center transform transition-all scale-100">
+                    <div className="w-16 h-16 bg-red-500/10 rounded-full flex items-center justify-center mx-auto mb-4 border border-red-500/20">
+                        <i className="fas fa-trash-alt text-2xl text-red-500"></i>
+                    </div>
+                    <h2 className="text-xl font-bold mb-2">নিশ্চিত করুন</h2>
+                    <p className="text-gray-400 mb-6">{confirmState.message}</p>
+                    <div className="flex gap-3">
+                        <button onClick={() => setConfirmState({isOpen: false, message: '', targetId: null})} className="flex-1 bg-white/10 hover:bg-white/20 text-white py-2.5 rounded-full font-bold transition">
+                            বাতিল
+                        </button>
+                        <button onClick={executeDelete} className="flex-1 bg-red-600 hover:bg-red-500 text-white py-2.5 rounded-full font-bold transition">
+                            ডিলিট করুন
+                        </button>
+                    </div>
+                </div>
+            </div>
+          )}
+
+          {/* ADD MEDIA MODAL */}
           {isAddModalOpen && (
-            <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 p-4">
+            <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm">
                 <div className="bg-[#212121] rounded-2xl w-full max-w-lg border border-gray-700 shadow-2xl">
                     <div className="flex justify-between items-center p-4 border-b border-gray-700">
                         <h2 className="text-xl font-bold">ভিডিও বা প্লেলিস্ট যোগ করুন</h2>
-                        <button onClick={() => setIsAddModalOpen(false)} className="text-gray-400 hover:text-white">
-                            <i className="fas fa-times text-xl"></i>
-                        </button>
+                        <button onClick={() => setIsAddModalOpen(false)} className="text-gray-400 hover:text-white"><i className="fas fa-times text-xl"></i></button>
                     </div>
                     <form onSubmit={handleAddSubmit} className="p-4 flex flex-col gap-4">
                         <div>
                             <label className="block text-sm text-gray-400 mb-1">ইউটিউব লিংক বা এমবেড কোড (বাধ্যতামূলক)</label>
-                            <input 
-                                type="text" 
-                                required
-                                placeholder='যেমন: https://youtube.com/watch?v=... বা <iframe src="...">' 
-                                className="w-full bg-[#121212] border border-gray-600 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-blue-500"
-                                value={newMediaInput.link}
-                                onChange={(e) => setNewMediaInput({...newMediaInput, link: e.target.value})}
-                            />
+                            <input type="text" required placeholder='যেমন: https://youtube.com/watch?v=...' className="w-full bg-[#121212] border border-gray-600 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-blue-500" value={newMediaInput.link} onChange={(e) => setNewMediaInput({...newMediaInput, link: e.target.value})} />
                         </div>
                         <div>
-                            <label className="block text-sm text-gray-400 mb-1">ভিডিও/প্লেলিস্টের নাম (ঐচ্ছিক)</label>
-                            <input 
-                                type="text" 
-                                placeholder="নাম দিন" 
-                                className="w-full bg-[#121212] border border-gray-600 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-blue-500"
-                                value={newMediaInput.title}
-                                onChange={(e) => setNewMediaInput({...newMediaInput, title: e.target.value})}
-                            />
+                            <label className="block text-sm text-gray-400 mb-1">টাইটেল (খালি রাখলে নিজে থেকেই তৈরি হবে)</label>
+                            <input type="text" placeholder="ভিডিও বা প্লেলিস্টের নাম" className="w-full bg-[#121212] border border-gray-600 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-blue-500" value={newMediaInput.title} onChange={(e) => setNewMediaInput({...newMediaInput, title: e.target.value})} />
                         </div>
                         <div>
                             <label className="block text-sm text-gray-400 mb-1">চ্যানেলের নাম (ঐচ্ছিক)</label>
-                            <input 
-                                type="text" 
-                                placeholder="চ্যানেলের নাম" 
-                                className="w-full bg-[#121212] border border-gray-600 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-blue-500"
-                                value={newMediaInput.channel}
-                                onChange={(e) => setNewMediaInput({...newMediaInput, channel: e.target.value})}
-                            />
+                            <input type="text" placeholder="চ্যানেলের নাম" className="w-full bg-[#121212] border border-gray-600 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-blue-500" value={newMediaInput.channel} onChange={(e) => setNewMediaInput({...newMediaInput, channel: e.target.value})} />
                         </div>
                         <div className="flex justify-end gap-3 mt-4">
-                            <button type="button" onClick={() => setIsAddModalOpen(false)} className="px-4 py-2 rounded-full font-bold hover:bg-white/10">
-                                বাতিল
-                            </button>
-                            <button type="submit" className="bg-blue-600 hover:bg-blue-500 text-white px-5 py-2 rounded-full font-bold transition">
-                                যোগ করুন
-                            </button>
+                            <button type="button" onClick={() => setIsAddModalOpen(false)} className="px-4 py-2 rounded-full font-bold hover:bg-white/10">বাতিল</button>
+                            <button type="submit" className="bg-blue-600 hover:bg-blue-500 text-white px-5 py-2 rounded-full font-bold transition">যোগ করুন</button>
                         </div>
                     </form>
                 </div>
@@ -743,44 +669,24 @@
 
           {/* CREATE CUSTOM PLAYLIST MODAL */}
           {isCreateListModalOpen && (
-            <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 p-4">
+            <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm">
                 <div className="bg-[#212121] rounded-2xl w-full max-w-lg border border-gray-700 shadow-2xl">
                     <div className="flex justify-between items-center p-4 border-b border-gray-700">
                         <h2 className="text-xl font-bold">নতুন প্লেলিস্ট বানান</h2>
-                        <button onClick={() => setIsCreateListModalOpen(false)} className="text-gray-400 hover:text-white">
-                            <i className="fas fa-times text-xl"></i>
-                        </button>
+                        <button onClick={() => setIsCreateListModalOpen(false)} className="text-gray-400 hover:text-white"><i className="fas fa-times text-xl"></i></button>
                     </div>
                     <form onSubmit={handleCreatePlaylist} className="p-4 flex flex-col gap-4">
                         <div>
                             <label className="block text-sm text-gray-400 mb-1">প্লেলিস্টের নাম</label>
-                            <input 
-                                type="text" 
-                                required
-                                placeholder="যেমন: My Favorite Videos" 
-                                className="w-full bg-[#121212] border border-gray-600 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-blue-500"
-                                value={newListTitle}
-                                onChange={(e) => setNewListTitle(e.target.value)}
-                            />
+                            <input type="text" required placeholder="যেমন: My Favorite Videos" className="w-full bg-[#121212] border border-gray-600 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-blue-500" value={newListTitle} onChange={(e) => setNewListTitle(e.target.value)} />
                         </div>
-                        
                         <div>
                             <label className="block text-sm text-gray-400 mb-1">ভিডিও সিলেক্ট করুন</label>
                             <div className="max-h-60 overflow-y-auto bg-[#121212] rounded-lg p-2 flex flex-col gap-1 border border-gray-600">
-                                {videos.filter(v => v.type === 'video').length === 0 && (
-                                    <p className="text-center text-gray-400 py-4 text-sm">কোনো সিঙ্গেল ভিডিও নেই। আগে ভিডিও যোগ করুন!</p>
-                                )}
+                                {videos.filter(v => v.type === 'video').length === 0 && <p className="text-center text-gray-400 py-4 text-sm">কোনো সিঙ্গেল ভিডিও নেই। আগে ভিডিও যোগ করুন!</p>}
                                 {videos.filter(v => v.type === 'video').map(v => (
                                     <label key={v.id} className="flex items-center gap-3 p-2 hover:bg-white/10 rounded cursor-pointer transition">
-                                        <input 
-                                            type="checkbox" 
-                                            checked={selectedVideoIds.includes(v.videoId)}
-                                            onChange={(e) => {
-                                                if(e.target.checked) setSelectedVideoIds([...selectedVideoIds, v.videoId]);
-                                                else setSelectedVideoIds(selectedVideoIds.filter(id => id !== v.videoId));
-                                            }}
-                                            className="w-4 h-4 rounded border-gray-500 bg-black cursor-pointer"
-                                        />
+                                        <input type="checkbox" checked={selectedVideoIds.includes(v.videoId)} onChange={(e) => { if(e.target.checked) setSelectedVideoIds([...selectedVideoIds, v.videoId]); else setSelectedVideoIds(selectedVideoIds.filter(id => id !== v.videoId)); }} className="w-4 h-4 rounded border-gray-500 bg-black cursor-pointer" />
                                         <img src={v.thumbnail} className="w-12 h-8 object-cover rounded" />
                                         <span className="text-sm truncate select-none">{v.title}</span>
                                     </label>
@@ -788,14 +694,9 @@
                             </div>
                             <p className="text-xs text-gray-400 mt-2 text-right">{selectedVideoIds.length} টি ভিডিও সিলেক্ট করা হয়েছে</p>
                         </div>
-
                         <div className="flex justify-end gap-3 mt-2">
-                            <button type="button" onClick={() => setIsCreateListModalOpen(false)} className="px-4 py-2 rounded-full font-bold hover:bg-white/10">
-                                বাতিল
-                            </button>
-                            <button type="submit" className="bg-blue-600 hover:bg-blue-500 text-white px-5 py-2 rounded-full font-bold transition">
-                                সেভ করুন
-                            </button>
+                            <button type="button" onClick={() => setIsCreateListModalOpen(false)} className="px-4 py-2 rounded-full font-bold hover:bg-white/10">বাতিল</button>
+                            <button type="submit" className="bg-blue-600 hover:bg-blue-500 text-white px-5 py-2 rounded-full font-bold transition">সেভ করুন</button>
                         </div>
                     </form>
                 </div>
@@ -808,12 +709,8 @@
     function SidebarItem({ icon, label, isOpen, active, onClick }) {
       return (
         <div onClick={onClick} className={`flex items-center ${isOpen ? 'justify-start px-3' : 'justify-center flex-col'} py-2.5 my-1 rounded-xl cursor-pointer transition-colors ${active ? 'bg-white/10 font-bold' : 'hover:bg-white/10'}`}>
-          <div className={`flex items-center justify-center ${isOpen ? 'mr-4' : 'mb-1'} ${active ? 'text-white' : 'text-gray-200'}`}>
-            {icon}
-          </div>
-          <span className={`${isOpen ? 'text-sm' : 'text-[10px]'} ${active ? 'text-white font-semibold' : 'text-gray-200'}`}>
-            {label}
-          </span>
+          <div className={`flex items-center justify-center ${isOpen ? 'mr-4' : 'mb-1'} ${active ? 'text-white' : 'text-gray-200'}`}>{icon}</div>
+          <span className={`${isOpen ? 'text-sm' : 'text-[10px]'} ${active ? 'text-white font-semibold' : 'text-gray-200'}`}>{label}</span>
         </div>
       );
     }
