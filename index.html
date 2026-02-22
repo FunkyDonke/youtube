@@ -624,38 +624,33 @@
             setIsMiniplayer(false);
             setAutoPlay(true);
             
+            // থিয়েটার মোড পুরোপুরি লোড হওয়ার জন্য একটু সময় নিচ্ছি
             setTimeout(() => {
-                // ১. ভিডিও কন্টেইনারের এক্স্যাক্ট পজিশন স্ক্যান করা
                 const container = document.getElementById('video-player-container');
                 if (!container) return;
                 
                 const rect = container.getBoundingClientRect();
                 
-                // ২. ব্রাউজারের বর্ডার এবং URL/Bookmark বারের সাইজ হিসাব করা
-                const chromeWidth = window.outerWidth - window.innerWidth;
-                const chromeHeight = window.outerHeight - window.innerHeight;
+                // ব্রাউজারের পজিশন
+                const browserX = window.screenLeft !== undefined ? window.screenLeft : window.screenX;
+                const browserY = window.screenTop !== undefined ? window.screenTop : window.screenY;
                 
-                const sideBorder = chromeWidth > 0 ? chromeWidth / 2 : 0;
-                const topChrome = chromeHeight > 0 ? chromeHeight - sideBorder : 0;
-
-                const screenX = window.screenX !== undefined ? window.screenX : window.screenLeft;
-                const screenY = window.screenY !== undefined ? window.screenY : window.screenTop;
-
-                // ৩. পপ-আপের জন্য চূড়ান্ত নিখুঁত পজিশন তৈরি
-                const left = Math.round(screenX + sideBorder + rect.left);
-                const top = Math.round(screenY + topChrome + rect.top);
+                // Edge/Chrome এর উপরের এড্রেসবার ও বর্ডারের আনুমানিক হিসাব
+                const chromeHeight = window.outerHeight - window.innerHeight;
+                const topOffset = chromeHeight > 0 ? chromeHeight - 8 : 80; 
+                
+                // উইন্ডোর এক্স্যাক্ট মাপ ও পজিশন
                 const width = Math.round(rect.width);
                 const height = Math.round(rect.height);
+                const left = Math.round(browserX + 8 + rect.left); // 8px standard border padding
+                const top = Math.round(browserY + topOffset + rect.top);
                 
-                // popup=yes ফিচারটি ব্যবহার করা হয়েছে যাতে উইন্ডোটি যতটা সম্ভব ক্লিন থাকে
-                const popup = window.open(
-                    video.externalUrl, 
-                    'ExternalVideoPopup', 
-                    `popup=yes,width=${width},height=${height},left=${left},top=${top}`
-                );
+                // menubar=no, toolbar=no দিলে Edge ব্রাউজারে এড্রেসবার ও ট্যাব হাইড হয়ে যায়
+                const features = `menubar=no,toolbar=no,location=no,status=no,scrollbars=no,resizable=yes,width=${width},height=${height},left=${left},top=${top}`;
                 
+                const popup = window.open(video.externalUrl, 'ExternalVideoPopup', features);
                 if (popup) popup.focus();
-            }, 150); // React রেন্ডার হওয়ার জন্য ছোট্ট একটি ডিলে
+            }, 300); 
             
             const updatedHistory = [video, ...watchHistory.filter(v => v.id !== video.id)].slice(0, 20);
             setWatchHistory(updatedHistory);
