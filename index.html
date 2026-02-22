@@ -634,27 +634,26 @@
                 const screenX = window.screenX !== undefined ? window.screenX : window.screenLeft;
                 const screenY = window.screenY !== undefined ? window.screenY : window.screenTop;
                 
-                // ব্রাউজারের নেভিগেশন বার ও বর্ডারের সঠিক পরিমাপ
+                // মেইন ব্রাউজারের বর্ডার ক্যালকুলেশন
                 const chromeWidth = window.outerWidth - window.innerWidth;
                 const chromeHeight = window.outerHeight - window.innerHeight;
                 const borderX = chromeWidth > 0 ? chromeWidth / 2 : 0;
                 const borderY = chromeHeight > 0 ? chromeHeight - borderX : 0;
                 
-                // পপ-আপের এক্স্যাক্ট স্ক্রিন পজিশন
-                const left = Math.round(screenX + borderX + rect.left);
-                const top = Math.round(screenY + borderY + rect.top);
+                // পপ-আপের এক্স্যাক্ট স্ক্রিন পজিশন (হালকা ভেতর দিকে চাপিয়ে দেওয়া হলো যাতে ওভারফ্লো না হয়)
+                const left = Math.round(screenX + borderX + rect.left + 5);
+                const top = Math.round(screenY + borderY + rect.top + 5);
                 
-                // মেইন ফিক্স: ব্রাউজার পপ-আপ উইন্ডোর চারদিকে নিজস্ব বর্ডার এবং উপরে টাইটেল বার (Title bar) যোগ করে। 
-                // এই কারণে আমরা শুধু width/height দিলে সেটা থিয়েটার বক্সের চেয়ে বড় হয়ে যায়।
-                // তাই আমরা থিয়েটার বক্সের মাপ থেকে পপ-আপের বর্ডার ও টাইটেল বারের মাপ (যেমন- উপরে ৩৫px, ডানে-বামে ১৬px) "বাদ" দিয়ে দিচ্ছি!
-                const popupTitleBarHeight = 35; // Windows OS title bar height
-                const popupSideBorders = 16; // 8px left + 8px right
+                // Edge ব্রাউজারে পপ-আপের এড্রেস বার এবং টাইটেল বার অনেক বড় হয় (প্রায় 80-90px)
+                // তাই থিয়েটার বক্স থেকে আরও বেশি জায়গা বাদ দিতে হবে যাতে এটি বক্সের বাইরে না যায়
+                const popupTitleBarHeight = 90; // Edge title bar + address bar
+                const popupSideBorders = 30; // Side borders + shadow compensation
                 
                 const width = Math.round(rect.width - popupSideBorders);
                 const height = Math.round(rect.height - popupTitleBarHeight);
                 
-                // resizable=no ব্যবহার করছি যাতে ব্রাউজার জোর করে সাইজ না বাড়ায়
-                const features = `menubar=no,toolbar=no,location=no,status=no,scrollbars=no,resizable=no,width=${width},height=${height},left=${left},top=${top}`;
+                // resizable=yes রাখা হয়েছে, তবে সাইজ একদম পারফেক্ট দেওয়া হয়েছে
+                const features = `menubar=no,toolbar=no,location=no,status=no,scrollbars=no,resizable=yes,width=${width},height=${height},left=${left},top=${top}`;
                 
                 const popup = window.open(video.externalUrl, 'ExternalVideoPopup', features);
                 if (popup) popup.focus();
@@ -1047,7 +1046,6 @@
                                   onClick={() => {
                                       if (currentVideoData.provider === 'local') {
                                           setCurrentPlaylistIndex(index);
-                                          // Update Play Index
                                           const indexes = JSON.parse(localStorage.getItem('ytClonePlaylistIndexes') || '{}');
                                           indexes[currentVideoData.id] = index;
                                           localStorage.setItem('ytClonePlaylistIndexes', JSON.stringify(indexes));
@@ -1120,7 +1118,6 @@
                       className={`${isMiniplayer ? 'fixed z-[100] flex flex-col overflow-visible visible' : (isTheaterMode ? 'w-full h-full relative' : 'w-full aspect-video relative')}`}
                       style={isMiniplayer && playerRect ? { left: `${playerRect.left}px`, top: `${playerRect.top}px`, width: `${playerRect.width}px`, height: `${playerRect.height}px` } : {}}
                     >
-                      {/* ID যুক্ত করা হলো যাতে পপ-আপ ঠিক এই বক্সটার মাপ নিতে পারে */}
                       <div id="video-player-container" className={`w-full h-full flex flex-col relative rounded-xl overflow-hidden group ${isMiniplayer ? 'bg-[#212121] shadow-2xl border border-gray-700' : 'bg-black shadow-lg'}`}>
                         <div className={`${isMiniplayer ? 'flex' : 'hidden'} h-10 flex-shrink-0 justify-between items-center px-3 bg-[#181818] cursor-move select-none z-10 border-b border-gray-700`} onMouseDown={handleDragStart} onTouchStart={handleDragStart}>
                           <div className="flex flex-col truncate pr-2 w-[75%]">
