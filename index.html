@@ -625,37 +625,37 @@
             setAutoPlay(true);
             
             setTimeout(() => {
-                // থিয়েটার মোডের এক্স্যাক্ট সাইজ এবং পজিশন ক্যালকুলেশন
-                const sidebarWidth = isSidebarOpen ? 256 : 80;
-                const padding = 16; // p-4 এর জন্য 16px
-                const navbarHeight = 64; // h-16 এর জন্য 64px
+                // ১. ভিডিও কন্টেইনারের এক্স্যাক্ট পজিশন স্ক্যান করা
+                const container = document.getElementById('video-player-container');
+                if (!container) return;
                 
-                // পপ-আপের এক্স্যাক্ট দৈর্ঘ্য এবং প্রস্থ (কালো বক্সের সমান)
-                const popupWidth = window.innerWidth - sidebarWidth - (padding * 2); 
-                const popupHeight = window.innerHeight - navbarHeight - (padding * 2); 
+                const rect = container.getBoundingClientRect();
                 
+                // ২. ব্রাউজারের বর্ডার এবং URL/Bookmark বারের সাইজ হিসাব করা
                 const chromeWidth = window.outerWidth - window.innerWidth;
                 const chromeHeight = window.outerHeight - window.innerHeight;
                 
-                // ব্রাউজারের বর্ডার এবং উপরের URL বারের উচ্চতা মেপে বাদ দেওয়া
-                const borderX = chromeWidth > 0 ? chromeWidth / 2 : 0;
-                const borderY = chromeHeight > 0 ? chromeHeight - borderX : 0;
+                const sideBorder = chromeWidth > 0 ? chromeWidth / 2 : 0;
+                const topChrome = chromeHeight > 0 ? chromeHeight - sideBorder : 0;
 
                 const screenX = window.screenX !== undefined ? window.screenX : window.screenLeft;
                 const screenY = window.screenY !== undefined ? window.screenY : window.screenTop;
 
-                // স্ক্রিনে পপ-আপটি হুবহু কালো বক্সের উপর বসানোর পজিশন
-                const left = screenX + borderX + sidebarWidth + padding;
-                const top = screenY + borderY + navbarHeight + padding; 
+                // ৩. পপ-আপের জন্য চূড়ান্ত নিখুঁত পজিশন তৈরি
+                const left = Math.round(screenX + sideBorder + rect.left);
+                const top = Math.round(screenY + topChrome + rect.top);
+                const width = Math.round(rect.width);
+                const height = Math.round(rect.height);
                 
+                // popup=yes ফিচারটি ব্যবহার করা হয়েছে যাতে উইন্ডোটি যতটা সম্ভব ক্লিন থাকে
                 const popup = window.open(
                     video.externalUrl, 
                     'ExternalVideoPopup', 
-                    `width=${popupWidth},height=${popupHeight},left=${left},top=${top},resizable=yes,scrollbars=yes,status=yes`
+                    `popup=yes,width=${width},height=${height},left=${left},top=${top}`
                 );
                 
                 if (popup) popup.focus();
-            }, 150); // থিয়েটার মোডের অ্যানিমেশন শেষ হওয়ার জন্য সামান্য সময় দেওয়া হলো
+            }, 150); // React রেন্ডার হওয়ার জন্য ছোট্ট একটি ডিলে
             
             const updatedHistory = [video, ...watchHistory.filter(v => v.id !== video.id)].slice(0, 20);
             setWatchHistory(updatedHistory);
@@ -1117,7 +1117,8 @@
                       className={`${isMiniplayer ? 'fixed z-[100] flex flex-col overflow-visible visible' : (isTheaterMode ? 'w-full h-full relative' : 'w-full aspect-video relative')}`}
                       style={isMiniplayer && playerRect ? { left: `${playerRect.left}px`, top: `${playerRect.top}px`, width: `${playerRect.width}px`, height: `${playerRect.height}px` } : {}}
                     >
-                      <div className={`w-full h-full flex flex-col relative rounded-xl overflow-hidden group ${isMiniplayer ? 'bg-[#212121] shadow-2xl border border-gray-700' : 'bg-black shadow-lg'}`}>
+                      {/* ID যুক্ত করা হলো যাতে পপ-আপ ঠিক এই বক্সটার মাপ নিতে পারে */}
+                      <div id="video-player-container" className={`w-full h-full flex flex-col relative rounded-xl overflow-hidden group ${isMiniplayer ? 'bg-[#212121] shadow-2xl border border-gray-700' : 'bg-black shadow-lg'}`}>
                         <div className={`${isMiniplayer ? 'flex' : 'hidden'} h-10 flex-shrink-0 justify-between items-center px-3 bg-[#181818] cursor-move select-none z-10 border-b border-gray-700`} onMouseDown={handleDragStart} onTouchStart={handleDragStart}>
                           <div className="flex flex-col truncate pr-2 w-[75%]">
                             <span className="text-sm font-bold truncate text-white">
