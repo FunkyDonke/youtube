@@ -625,19 +625,28 @@
             setAutoPlay(true);
             
             setTimeout(() => {
+                // থিয়েটার মোডের এক্স্যাক্ট সাইজ এবং পজিশন ক্যালকুলেশন
                 const sidebarWidth = isSidebarOpen ? 256 : 80;
+                const padding = 16; // p-4 এর জন্য 16px
+                const navbarHeight = 64; // h-16 এর জন্য 64px
+                
+                // পপ-আপের এক্স্যাক্ট দৈর্ঘ্য এবং প্রস্থ (কালো বক্সের সমান)
+                const popupWidth = window.innerWidth - sidebarWidth - (padding * 2); 
+                const popupHeight = window.innerHeight - navbarHeight - (padding * 2); 
+                
                 const chromeWidth = window.outerWidth - window.innerWidth;
                 const chromeHeight = window.outerHeight - window.innerHeight;
                 
-                const popupWidth = window.innerWidth - sidebarWidth - 32; 
-                const popupHeight = window.innerHeight - 64 - 32; 
-                
+                // ব্রাউজারের বর্ডার এবং উপরের URL বারের উচ্চতা মেপে বাদ দেওয়া
+                const borderX = chromeWidth > 0 ? chromeWidth / 2 : 0;
+                const borderY = chromeHeight > 0 ? chromeHeight - borderX : 0;
+
                 const screenX = window.screenX !== undefined ? window.screenX : window.screenLeft;
                 const screenY = window.screenY !== undefined ? window.screenY : window.screenTop;
 
-                // Position calculation for overlapping the theater mode box
-                const left = screenX + (chromeWidth / 2) + sidebarWidth + 16;
-                const top = screenY + chromeHeight + 64 + 16; 
+                // স্ক্রিনে পপ-আপটি হুবহু কালো বক্সের উপর বসানোর পজিশন
+                const left = screenX + borderX + sidebarWidth + padding;
+                const top = screenY + borderY + navbarHeight + padding; 
                 
                 const popup = window.open(
                     video.externalUrl, 
@@ -646,7 +655,7 @@
                 );
                 
                 if (popup) popup.focus();
-            }, 100);
+            }, 150); // থিয়েটার মোডের অ্যানিমেশন শেষ হওয়ার জন্য সামান্য সময় দেওয়া হলো
             
             const updatedHistory = [video, ...watchHistory.filter(v => v.id !== video.id)].slice(0, 20);
             setWatchHistory(updatedHistory);
