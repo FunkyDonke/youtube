@@ -28,7 +28,7 @@
     }
   </script>
   <style>
-    /* Custom Scrollbar for Playlist Queue */
+    /* Custom Scrollbar */
     .custom-scrollbar::-webkit-scrollbar { width: 6px; }
     .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
     .custom-scrollbar::-webkit-scrollbar-thumb { background: #555; border-radius: 10px; }
@@ -100,8 +100,7 @@
       return { videoId, listId, driveId, title };
     }
 
-    // Native YouTube Hover Player Component
-    function HoverPlayer({ videoId, savedTime, onPlay }) {
+    function HoverPlayer({ videoId, savedTime }) {
         const playerContainerRef = useRef(null);
         const playerRef = useRef(null);
 
@@ -109,7 +108,6 @@
             if (!window.YT) return;
             
             const playerDiv = document.createElement('div');
-            // Full width and height
             playerDiv.style.width = '100%';
             playerDiv.style.height = '100%';
             playerContainerRef.current.appendChild(playerDiv);
@@ -120,17 +118,12 @@
                     autoplay: 1, 
                     mute: 1, 
                     start: savedTime || 0, 
-                    controls: 1, // Enable native controls for seekbar and previews
+                    controls: 1, 
                     modestbranding: 1, 
                     playsinline: 1, 
                     rel: 0,
                     showinfo: 0,
                     fs: 0
-                },
-                events: {
-                    onReady: (e) => {
-                        e.target.playVideo();
-                    }
                 }
             });
 
@@ -145,22 +138,30 @@
         }, [videoId, savedTime]);
 
         return (
-            <div className="absolute inset-0 z-10 bg-black rounded-lg overflow-hidden group/player">
-                {/* No scaling, exact native YouTube player size */}
+            <div className="absolute inset-0 z-10 bg-black rounded-lg overflow-hidden group/player pointer-events-auto">
                 <div className="w-full h-full pointer-events-auto" ref={playerContainerRef}></div>
-                
-                {/* Clickable Overlay: 
-                    Top part triggers navigation to main video.
-                    Bottom 45px is left completely transparent to pointer events 
-                    so native YouTube controls (seekbar, preview) work smoothly. */}
-                <div 
-                    className="absolute top-0 left-0 right-0 bottom-[45px] z-20 cursor-pointer"
-                    onClick={(e) => {
-                        e.stopPropagation();
-                        onPlay();
-                    }}
-                ></div>
             </div>
+        );
+    }
+
+    // Helper Component for Sidebar Toggles
+    function SidebarToggle({ icon, label, isExpanded, onToggle, children, isOpen, scrollable }) {
+        return (
+            <>
+                <div 
+                    onClick={onToggle} 
+                    className={`flex items-center ${isOpen ? 'justify-start px-3' : 'justify-center flex-col'} py-2.5 my-1 rounded-xl cursor-pointer transition-colors ${isExpanded ? 'bg-white/10 font-bold' : 'hover:bg-white/10'}`}
+                >
+                    <div className={`flex items-center justify-center ${isOpen ? 'mr-4' : 'mb-1'} ${isExpanded ? 'text-white' : 'text-gray-200'}`}>{icon}</div>
+                    <span className={`${isOpen ? 'text-sm' : 'text-[10px]'} flex-1 ${isExpanded ? 'text-white font-semibold' : 'text-gray-200'} whitespace-nowrap overflow-hidden text-ellipsis`}>{label}</span>
+                    {isOpen && <i className={`fas fa-chevron-down text-xs text-gray-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`}></i>}
+                </div>
+                {isExpanded && isOpen && (
+                    <div className={`flex flex-col gap-2 px-2 mt-1 mb-3 ${scrollable ? 'max-h-[260px] overflow-y-auto custom-scrollbar pr-1' : ''}`}>
+                        {children}
+                    </div>
+                )}
+            </>
         );
     }
 
@@ -173,9 +174,18 @@
       const [currentVideo, setCurrentVideo] = useState(null);
       const [searchQuery, setSearchQuery] = useState('');
       const [isSidebarOpen, setIsSidebarOpen] = useState(true);
-      const [activeTab, setActiveTab] = useState('home');
+      
       const [watchHistory, setWatchHistory] = useState([]);
       const [lastWatched, setLastWatched] = useState(null);
+      
+      // Sidebar Dropdown States
+      const [isAllVideosExpanded, setIsAllVideosExpanded] = useState(false);
+      const [isAllPlaylistsExpanded, setIsAllPlaylistsExpanded] = useState(false);
+      const [isCurrentPlaylistExpanded, setIsCurrentPlaylistExpanded] = useState(true);
+      const [isHistoryExpanded, setIsHistoryExpanded] = useState(false);
+      
+      // Grid Size Control State
+      const [gridCols, setGridCols] = useState(4);
 
       const [playlistQueue, setPlaylistQueue] = useState([]);
       const [currentPlaylistIndex, setCurrentPlaylistIndex] = useState(0);
@@ -191,6 +201,7 @@
       const [selectedVideoIds, setSelectedVideoIds] = useState([]);
 
       const [isMiniplayer, setIsMiniplayer] = useState(false);
+      const [isTheaterMode, setIsTheaterMode] = useState(false);
       const [playerRect, setPlayerRect] = useState(null); 
       const [isDragging, setIsDragging] = useState(false);
       const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
@@ -448,8 +459,10 @@
         setCurrentVideo(video);
         setLastWatched(video);
         setIsMiniplayer(false); 
+        // থিয়েটার মোড অফ করা হচ্ছে না, যাতে এটি সেভ থাকে
         setPlaylistQueue([]); 
         setCurrentPlaylistIndex(0);
+        setIsCurrentPlaylistExpanded(true); // Auto expand current playlist in sidebar
 
         const updatedHistory = [video, ...watchHistory.filter(v => v.id !== video.id)].slice(0, 20);
         setWatchHistory(updatedHistory);
@@ -619,6 +632,14 @@
         };
       }, [isDragging, resizeState, dragOffset, playerRect]);
 
+      let gridClass = "grid gap-x-4 gap-y-8 ";
+      if (gridCols === 1) gridClass += "grid-cols-1";
+      else if (gridCols === 2) gridClass += "grid-cols-1 sm:grid-cols-2";
+      else if (gridCols === 3) gridClass += "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3";
+      else if (gridCols === 4) gridClass += "grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4";
+      else if (gridCols === 5) gridClass += "grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5";
+      else gridClass += "grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6";
+
       return (
         <div className="min-h-screen flex flex-col relative overflow-hidden bg-[#0f0f0f]">
           <header className="flex items-center justify-between px-4 py-2 sticky top-0 bg-[#0f0f0f] z-40 h-16 border-b border-white/10">
@@ -626,13 +647,13 @@
               <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="p-2 hover:bg-white/10 rounded-full transition-colors">
                 <i className="fas fa-bars text-xl"></i>
               </button>
-              <div className="flex items-center gap-2 cursor-pointer" onClick={() => { if (currentVideo) activateMiniplayer(); setActiveTab('home'); }}>
+              <div className="flex items-center gap-2 cursor-pointer" onClick={() => { setCurrentVideo(null); setIsMiniplayer(false); }}>
                 <i className="fab fa-youtube text-red-600 text-3xl"></i>
                 <span className="text-xl font-bold tracking-tighter hidden sm:block">YouTube</span>
               </div>
             </div>
 
-            <div className="flex-1 max-w-2xl flex items-center ml-4 mr-4">
+            <div className="flex-1 max-w-xl flex items-center ml-4 mr-4">
               <div className="flex w-full bg-[#121212] border border-white/20 rounded-full overflow-hidden focus-within:border-blue-500">
                 <input 
                   type="text" 
@@ -648,6 +669,17 @@
             </div>
 
             <div className="flex items-center gap-2 sm:gap-3">
+              {(!currentVideo || isMiniplayer) && (
+                <div className="hidden md:flex items-center gap-2 bg-[#212121] px-2 py-1 rounded-full border border-gray-700 mr-1">
+                  <button onClick={() => setGridCols(Math.max(1, gridCols - 1))} className="text-gray-300 hover:text-white hover:bg-white/10 w-6 h-6 rounded flex items-center justify-center transition" title="ভিডিও বড় করুন">
+                      <i className="fas fa-plus text-[10px]"></i>
+                  </button>
+                  <div className="w-px h-3 bg-gray-600"></div>
+                  <button onClick={() => setGridCols(Math.min(6, gridCols + 1))} className="text-gray-300 hover:text-white hover:bg-white/10 w-6 h-6 rounded flex items-center justify-center transition" title="ভিডিও ছোট করুন">
+                      <i className="fas fa-minus text-[10px]"></i>
+                  </button>
+                </div>
+              )}
               <button onClick={() => setIsCreateListModalOpen(true)} className="flex items-center gap-2 px-3 py-1.5 bg-blue-600/20 hover:bg-blue-600/40 text-blue-400 rounded-full transition-colors border border-blue-500/30">
                 <i className="fas fa-folder-plus text-sm"></i><span className="text-sm font-semibold hidden md:block">প্লেলিস্ট বানান</span>
               </button>
@@ -658,23 +690,159 @@
           </header>
 
           <div className="flex flex-1 overflow-hidden">
-            <aside className={`${isSidebarOpen ? 'w-60' : 'w-20'} hidden md:flex flex-col bg-[#0f0f0f] transition-all duration-300 overflow-y-auto px-2 py-3 border-r border-white/10 custom-scrollbar`}>
-              <SidebarItem icon={<i className="fas fa-home text-xl"></i>} label="হোম" isOpen={isSidebarOpen} active={activeTab === 'home' && !currentVideo} onClick={() => { setActiveTab('home'); if(currentVideo) activateMiniplayer(); }} />
-              <SidebarItem icon={<i className="fab fa-youtube text-xl"></i>} label="শর্টস" isOpen={isSidebarOpen} />
-              {isSidebarOpen && <hr className="border-white/20 my-3" />}
-              <SidebarItem icon={<i className="fas fa-history text-xl"></i>} label="ইতিহাস" isOpen={isSidebarOpen} active={activeTab === 'history'} onClick={() => { setActiveTab('history'); if(currentVideo) activateMiniplayer(); }} />
+            <aside className={`${isSidebarOpen ? 'w-64' : 'w-20'} flex-shrink-0 hidden md:flex flex-col bg-[#0f0f0f] transition-all duration-300 overflow-y-auto px-2 py-3 border-r border-white/10 custom-scrollbar`}>
+              
+              {/* Home */}
+              <div onClick={() => { setCurrentVideo(null); setIsMiniplayer(false); }} className={`flex items-center ${isSidebarOpen ? 'justify-start px-3' : 'justify-center flex-col'} py-2.5 my-1 rounded-xl cursor-pointer transition-colors ${!currentVideo ? 'bg-white/10 font-bold' : 'hover:bg-white/10'}`}>
+                <div className={`flex items-center justify-center ${isSidebarOpen ? 'mr-4' : 'mb-1'} ${!currentVideo ? 'text-white' : 'text-gray-200'}`}><i className="fas fa-home text-xl"></i></div>
+                <span className={`${isSidebarOpen ? 'text-sm' : 'text-[10px]'} ${!currentVideo ? 'text-white font-semibold' : 'text-gray-200'}`}>হোম</span>
+              </div>
+              
+              {/* All Videos Toggle */}
+              <SidebarToggle icon={<i className="fas fa-video text-xl"></i>} label="সকল ভিডিও" isExpanded={isAllVideosExpanded} onToggle={() => setIsAllVideosExpanded(!isAllVideosExpanded)} isOpen={isSidebarOpen} scrollable={true}>
+                  {videos.filter(v => v.type === 'video').length === 0 && <p className="text-xs text-gray-500 pl-1">কোনো ভিডিও নেই</p>}
+                  {videos.filter(v => v.type === 'video').map((video, idx) => {
+                      const watchedSec = progressData.times[video.id] || 0;
+                      const totalSec = progressData.durations[video.id] || 0;
+                      const progressPercent = totalSec > 0 ? Math.min((watchedSec / totalSec) * 100, 100) : 0;
+                      return (
+                        <div key={idx} className="flex gap-2 cursor-pointer hover:bg-white/10 p-1.5 rounded-lg transition-colors group" onClick={() => playVideo(video)}>
+                          <div className="w-16 h-10 relative flex-shrink-0 bg-black rounded overflow-hidden border border-white/10">
+                            <img src={video.thumbnail} className="w-full h-full object-cover" />
+                            {progressPercent > 0 && (
+                                <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-gray-600/80">
+                                  <div className="h-full bg-red-600" style={{ width: `${progressPercent}%` }}></div>
+                                </div>
+                            )}
+                          </div>
+                          <div className="flex flex-col justify-center overflow-hidden flex-1">
+                            <span className="text-[11px] font-semibold text-white line-clamp-1 group-hover:text-blue-400">{video.title}</span>
+                            <span className="text-[9px] text-gray-400 truncate">{video.channel}</span>
+                          </div>
+                        </div>
+                      )
+                  })}
+              </SidebarToggle>
+
+              {/* All Playlists Toggle */}
+              <SidebarToggle icon={<i className="fas fa-layer-group text-xl"></i>} label="সকল প্লেলিস্ট" isExpanded={isAllPlaylistsExpanded} onToggle={() => setIsAllPlaylistsExpanded(!isAllPlaylistsExpanded)} isOpen={isSidebarOpen} scrollable={true}>
+                  {videos.filter(v => v.type.includes('playlist')).length === 0 && <p className="text-xs text-gray-500 pl-1">কোনো প্লেলিস্ট নেই</p>}
+                  {videos.filter(v => v.type.includes('playlist')).map((video, idx) => {
+                      return (
+                        <div key={idx} className="flex gap-2 cursor-pointer hover:bg-white/10 p-1.5 rounded-lg transition-colors group" onClick={() => playVideo(video)}>
+                          <div className="w-16 h-10 relative flex-shrink-0 bg-black rounded overflow-hidden border border-white/10">
+                            <img src={video.thumbnail} className="w-full h-full object-cover" />
+                            <div className="absolute bottom-0.5 right-0.5 bg-black/80 text-[8px] px-1 rounded flex items-center gap-0.5"><i className="fas fa-list"></i></div>
+                          </div>
+                          <div className="flex flex-col justify-center overflow-hidden flex-1">
+                            <span className="text-[11px] font-semibold text-white line-clamp-1 group-hover:text-blue-400">{video.title}</span>
+                            <span className="text-[9px] text-gray-400 truncate">{video.channel}</span>
+                          </div>
+                        </div>
+                      )
+                  })}
+              </SidebarToggle>
+
+              {/* Current Playlist Toggle (Only visible if a playlist is active) */}
+              {currentVideoData?.type?.includes('playlist') && playlistQueue.length > 0 && (
+                  <>
+                  <hr className="border-white/10 my-2" />
+                  <SidebarToggle icon={<i className="fas fa-play-circle text-xl text-blue-400"></i>} label="বর্তমান প্লেলিস্ট" isExpanded={isCurrentPlaylistExpanded} onToggle={() => setIsCurrentPlaylistExpanded(!isCurrentPlaylistExpanded)} isOpen={isSidebarOpen} scrollable={true}>
+                      {playlistQueue.map((vidId, index) => {
+                          const isPlaying = index === currentPlaylistIndex;
+                          const localVidInfo = videos.find(v => v.videoId === vidId);
+                          const meta = fetchedMeta[vidId];
+                          let title = `ভিডিও ${index + 1}`;
+                          let channel = 'YouTube';
+
+                          if (localVidInfo) {
+                              title = localVidInfo.title;
+                              channel = localVidInfo.channel;
+                          } else if (meta && meta.title) {
+                              title = meta.title;
+                              channel = meta.channel;
+                          } else if (meta && meta.loading) {
+                              title = 'লোড হচ্ছে...';
+                          }
+
+                          let progressPercent = 0;
+                          if (localVidInfo) {
+                              const watchedSec = progressData.times[localVidInfo.id] || 0;
+                              const totalSec = progressData.durations[localVidInfo.id] || 0;
+                              progressPercent = totalSec > 0 ? Math.min((watchedSec / totalSec) * 100, 100) : 0;
+                          }
+
+                          return (
+                              <div 
+                                  key={index} 
+                                  onClick={() => playerRef.current?.playVideoAt(index)}
+                                  className={`flex gap-2 cursor-pointer hover:bg-white/10 p-1.5 rounded-lg transition-colors group ${isPlaying ? 'bg-white/20 border border-white/10' : ''}`}
+                              >
+                                  <div className="text-[10px] text-gray-400 w-3 flex items-center justify-center">
+                                      {isPlaying ? <i className="fas fa-play text-white"></i> : index + 1}
+                                  </div>
+                                  <div className="w-16 h-10 relative flex-shrink-0 bg-black rounded overflow-hidden border border-white/10">
+                                      <img src={`https://img.youtube.com/vi/${vidId}/mqdefault.jpg`} className="w-full h-full object-cover" />
+                                      {progressPercent > 0 && (
+                                          <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-gray-600/80">
+                                              <div className="h-full bg-red-600" style={{ width: `${progressPercent}%` }}></div>
+                                          </div>
+                                      )}
+                                  </div>
+                                  <div className="flex flex-col justify-center overflow-hidden flex-1">
+                                      <span className={`text-[11px] font-semibold line-clamp-1 group-hover:text-blue-400 ${isPlaying ? 'text-white' : 'text-gray-300'}`}>{title}</span>
+                                      <span className="text-[9px] text-gray-400 truncate">{channel}</span>
+                                  </div>
+                              </div>
+                          )
+                      })}
+                  </SidebarToggle>
+                  </>
+              )}
+
+              {isSidebarOpen && <hr className="border-white/10 my-2" />}
+              
+              {/* History Toggle */}
+              <SidebarToggle icon={<i className="fas fa-history text-xl"></i>} label="ইতিহাস" isExpanded={isHistoryExpanded} onToggle={() => setIsHistoryExpanded(!isHistoryExpanded)} isOpen={isSidebarOpen} scrollable={true}>
+                  {watchHistory.length === 0 ? (
+                    <p className="text-xs text-gray-500 pl-1">কোনো ইতিহাস নেই</p>
+                  ) : (
+                    watchHistory.map((video, idx) => {
+                      const watchedSec = progressData.times[video.id] || 0;
+                      const totalSec = progressData.durations[video.id] || 0;
+                      const progressPercent = totalSec > 0 ? Math.min((watchedSec / totalSec) * 100, 100) : 0;
+                      return (
+                        <div key={idx} className="flex gap-2 cursor-pointer hover:bg-white/10 p-1.5 rounded-lg transition-colors group" onClick={() => playVideo(video)}>
+                          <div className="w-16 h-10 relative flex-shrink-0 bg-black rounded overflow-hidden border border-white/10">
+                            <img src={video.thumbnail} className="w-full h-full object-cover" />
+                            {progressPercent > 0 && (
+                                <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-gray-600/80">
+                                  <div className="h-full bg-red-600" style={{ width: `${progressPercent}%` }}></div>
+                                </div>
+                            )}
+                          </div>
+                          <div className="flex flex-col justify-center overflow-hidden flex-1">
+                            <span className="text-[11px] font-semibold text-white line-clamp-1 group-hover:text-blue-400">{video.title}</span>
+                            <span className="text-[9px] text-gray-400 truncate">{video.channel}</span>
+                          </div>
+                        </div>
+                      )
+                    })
+                  )}
+              </SidebarToggle>
+
             </aside>
 
             <main className="flex-1 overflow-y-auto bg-[#0f0f0f] relative custom-scrollbar">
               
-              <div className={`max-w-[1600px] mx-auto p-4 flex-col lg:flex-row gap-6 ${(currentVideo && !isMiniplayer) ? 'flex' : 'absolute w-0 h-0 overflow-hidden invisible'}`}>
-                <div className="flex-1 lg:w-2/3 flex flex-col relative">
+              <div className={`${isTheaterMode && !isMiniplayer ? 'w-full max-w-full h-[calc(100vh-64px)] p-4 flex-col' : 'max-w-[1600px] mx-auto p-4 flex-col lg:flex-row'} gap-6 ${(currentVideo && !isMiniplayer) ? 'flex' : 'absolute w-0 h-0 overflow-hidden invisible'}`}>
+                <div className={`flex flex-col relative ${isTheaterMode && !isMiniplayer ? 'w-full h-full' : 'flex-1 lg:w-2/3'}`}>
                   {currentVideo && (
                     <div 
-                      className={`${isMiniplayer ? 'fixed z-[100] flex flex-col overflow-visible visible' : 'w-full aspect-video relative'}`}
+                      className={`${isMiniplayer ? 'fixed z-[100] flex flex-col overflow-visible visible' : (isTheaterMode ? 'w-full h-full relative' : 'w-full aspect-video relative')}`}
                       style={isMiniplayer && playerRect ? { left: `${playerRect.left}px`, top: `${playerRect.top}px`, width: `${playerRect.width}px`, height: `${playerRect.height}px` } : {}}
                     >
-                      <div className={`w-full h-full flex flex-col relative rounded-xl overflow-hidden ${isMiniplayer ? 'bg-[#212121] shadow-2xl border border-gray-700' : 'bg-black shadow-lg'}`}>
+                      <div className={`w-full h-full flex flex-col relative rounded-xl overflow-hidden group ${isMiniplayer ? 'bg-[#212121] shadow-2xl border border-gray-700' : 'bg-black shadow-lg'}`}>
                         <div className={`${isMiniplayer ? 'flex' : 'hidden'} h-10 flex-shrink-0 justify-between items-center px-3 bg-[#181818] cursor-move select-none z-10 border-b border-gray-700`} onMouseDown={handleDragStart} onTouchStart={handleDragStart}>
                           <div className="flex flex-col truncate pr-2 w-[75%]">
                             <span className="text-sm font-bold truncate text-white">
@@ -692,7 +860,6 @@
                         <div className="w-full flex-1 relative bg-black pointer-events-auto overflow-hidden">
                           {(isDragging || resizeState.active) && <div className="absolute inset-0 z-10 bg-transparent"></div>}
                           
-                          {/* Blank Screen Fixed with Stable Container */}
                           <div 
                               ref={ytContainerRef} 
                               className={`w-full h-full absolute inset-0 ${(!currentVideoData?.provider || currentVideoData?.provider === 'youtube') ? 'block' : 'hidden'}`}
@@ -707,6 +874,13 @@
                               ></iframe>
                           )}
                         </div>
+
+                        {/* Theater Mode Exit Button (Overlay) - Moved to Bottom Right inside the video */}
+                        {isTheaterMode && !isMiniplayer && (
+                            <button onClick={() => setIsTheaterMode(false)} className="absolute bottom-[70px] right-6 z-50 bg-black/80 hover:bg-black text-white px-5 py-2.5 rounded-md flex items-center gap-2 transition-all backdrop-blur-sm border border-white/20 opacity-0 group-hover:opacity-100 shadow-xl font-medium text-sm">
+                                <i className="fas fa-compress"></i> সাধারণ ভিউ
+                            </button>
+                        )}
                       </div>
 
                       {isMiniplayer && (
@@ -724,7 +898,7 @@
                     </div>
                   )}
 
-                  <div className={`${isMiniplayer ? 'hidden' : 'block'}`}>
+                  <div className={`${(isMiniplayer || isTheaterMode) ? 'hidden' : 'block'}`}>
                     <h1 className="text-xl md:text-2xl font-bold mt-4 mb-1">
                         {currentVideoData?.provider === 'gdrive' && <span className="bg-blue-600/20 text-blue-400 text-xs px-2 py-1 rounded mr-2 align-middle border border-blue-500/30"><i className="fab fa-google-drive"></i> Google Drive</span>}
                         {displayTitle}
@@ -744,7 +918,10 @@
                         <button className="bg-white text-black px-4 py-2 rounded-full font-bold ml-2 hover:bg-gray-200 transition">সাবস্ক্রাইব</button>
                       </div>
                       <div className="flex items-center gap-2">
-                        <button onClick={activateMiniplayer} className="flex items-center gap-2 px-4 py-2 bg-white/10 rounded-full hover:bg-white/20 transition font-bold" title="Miniplayer">
+                        <button onClick={() => setIsTheaterMode(true)} className="flex items-center gap-2 px-4 py-2 bg-white/10 rounded-full hover:bg-white/20 transition font-bold whitespace-nowrap" title="থিয়েটার মোড">
+                          <i className="fas fa-tv"></i> থিয়েটার
+                        </button>
+                        <button onClick={activateMiniplayer} className="flex items-center gap-2 px-4 py-2 bg-white/10 rounded-full hover:bg-white/20 transition font-bold whitespace-nowrap" title="Miniplayer">
                           <i className="fas fa-compress-alt"></i> মিনিপ্লেয়ার
                         </button>
                       </div>
@@ -752,7 +929,7 @@
                   </div>
                 </div>
 
-                <div className={`lg:w-1/3 w-full flex flex-col gap-3 ${isMiniplayer ? 'hidden' : 'flex'}`}>
+                <div className={`lg:w-1/3 w-full flex flex-col gap-3 ${(isMiniplayer || isTheaterMode) ? 'hidden' : 'flex'}`}>
                   
                   {playlistQueue.length > 0 && currentVideoData?.type.includes('playlist') && (
                       <div className="bg-[#212121] rounded-xl border border-white/10 flex flex-col max-h-[500px] shadow-lg mb-2">
@@ -815,9 +992,18 @@
                             onMouseEnter={() => handleMouseEnter(video)}
                             onMouseLeave={handleMouseLeave}
                           >
+                            {/* TOP-LEFT Delete Button to avoid Native YouTube Controls */}
+                            <button 
+                              onClick={(e) => deleteMedia(e, video.id)}
+                              className="absolute top-1 left-1 bg-black/80 hover:bg-red-600 text-white w-6 h-6 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition z-30 shadow-lg"
+                              title="মুছে ফেলুন"
+                            >
+                              <i className="fas fa-trash text-[10px]"></i>
+                            </button>
+
                             <img src={video.thumbnail} alt={video.title} onClick={() => playVideo(video)} className={`w-full h-full object-cover transition duration-300 cursor-pointer ${hoveredVideo === video.id ? 'opacity-0' : 'opacity-100'}`} />
                             
-                            {hoveredVideo === video.id && <HoverPlayer videoId={video.videoId} savedTime={watchedSec} onPlay={() => playVideo(video)} />}
+                            {hoveredVideo === video.id && <HoverPlayer videoId={video.videoId} savedTime={watchedSec} />}
 
                             {/* Red Progress Bar */}
                             {progressPercent > 0 && hoveredVideo !== video.id && (
@@ -844,34 +1030,36 @@
 
               <div className={`p-4 sm:p-6 lg:p-8 max-w-[1800px] mx-auto ${(!currentVideo || isMiniplayer) ? 'block' : 'hidden'}`}>
                 
-                <h2 className="text-xl font-bold mb-6">
-                  {activeTab === 'history' ? 'আপনার দেখার ইতিহাস' : (searchQuery ? `"${searchQuery}" এর ফলাফল` : 'প্রস্তাবিত ভিডিও ও প্লেলিস্ট')}
-                </h2>
+                {/* Search Header */}
+                <div className="mb-6">
+                  {searchQuery && <h2 className="text-xl font-bold">"{searchQuery}" এর ফলাফল</h2>}
+                </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-x-4 gap-y-8">
-                  {(activeTab === 'history' ? watchHistory : filteredVideos).map((video, index) => {
+                <div className={gridClass}>
+                  {filteredVideos.map((video, index) => {
                       const watchedSec = progressData.times[video.id] || 0;
                       const totalSec = progressData.durations[video.id] || 0;
                       const progressPercent = totalSec > 0 ? Math.min((watchedSec / totalSec) * 100, 100) : 0;
 
                       return (
-                        <div key={`${video.id}-${index}`} className="flex flex-col cursor-pointer group relative">
+                        <div key={`${video.id}-${index}`} className="flex flex-col group relative">
+                          {/* TOP-LEFT Delete Button to avoid Native YouTube Controls */}
                           <button 
                             onClick={(e) => deleteMedia(e, video.id)}
-                            className="absolute top-2 right-2 bg-black/80 hover:bg-red-600 text-white w-8 h-8 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition z-30 shadow-lg"
+                            className="absolute top-2 left-2 bg-black/80 hover:bg-red-600 text-white w-8 h-8 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition z-30 shadow-lg"
                             title="মুছে ফেলুন"
                           >
                             <i className="fas fa-trash text-sm"></i>
                           </button>
+
                           <div 
-                            className="w-full aspect-video relative rounded-xl overflow-hidden mb-3 border border-white/10 bg-gray-900"
+                            className="w-full aspect-video relative rounded-xl overflow-hidden mb-3 border border-white/10 bg-gray-900 cursor-pointer"
                             onMouseEnter={() => handleMouseEnter(video)}
                             onMouseLeave={handleMouseLeave}
                           >
-                            <img src={video.thumbnail} alt={video.title} onClick={() => playVideo(video)} className={`w-full h-full object-cover transition duration-300 cursor-pointer ${hoveredVideo === video.id ? 'opacity-0' : 'opacity-100'}`} />
+                            <img src={video.thumbnail} alt={video.title} onClick={() => playVideo(video)} className={`w-full h-full object-cover transition duration-300 ${hoveredVideo === video.id ? 'opacity-0' : 'opacity-100'}`} />
                             
-                            {/* Hover Player is perfectly injected here */}
-                            {hoveredVideo === video.id && <HoverPlayer videoId={video.videoId} savedTime={watchedSec} onPlay={() => playVideo(video)} />}
+                            {hoveredVideo === video.id && <HoverPlayer videoId={video.videoId} savedTime={watchedSec} />}
 
                             {/* Red Progress Bar */}
                             {progressPercent > 0 && hoveredVideo !== video.id && (
@@ -886,7 +1074,9 @@
                                 </div>
                             )}
                           </div>
-                          <div className="flex gap-3 pr-2" onClick={() => playVideo(video)}>
+                          
+                          {/* Clickable Title Area to open video */}
+                          <div className="flex gap-3 pr-2 cursor-pointer" onClick={() => playVideo(video)}>
                             <img src={video.channelAvatar} alt={video.channel} className="w-9 h-9 rounded-full mt-1 flex-shrink-0" />
                             <div>
                               <h3 className="text-sm font-semibold line-clamp-2 group-hover:text-blue-400">{video.title}</h3>
@@ -1000,15 +1190,6 @@
                 </div>
             </div>
           )}
-        </div>
-      );
-    }
-
-    function SidebarItem({ icon, label, isOpen, active, onClick }) {
-      return (
-        <div onClick={onClick} className={`flex items-center ${isOpen ? 'justify-start px-3' : 'justify-center flex-col'} py-2.5 my-1 rounded-xl cursor-pointer transition-colors ${active ? 'bg-white/10 font-bold' : 'hover:bg-white/10'}`}>
-          <div className={`flex items-center justify-center ${isOpen ? 'mr-4' : 'mb-1'} ${active ? 'text-white' : 'text-gray-200'}`}>{icon}</div>
-          <span className={`${isOpen ? 'text-sm' : 'text-[10px]'} ${active ? 'text-white font-semibold' : 'text-gray-200'}`}>{label}</span>
         </div>
       );
     }
