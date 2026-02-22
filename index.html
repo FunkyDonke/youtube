@@ -624,29 +624,37 @@
             setIsMiniplayer(false);
             setAutoPlay(true);
             
-            // থিয়েটার মোড পুরোপুরি লোড হওয়ার জন্য একটু সময় নিচ্ছি
             setTimeout(() => {
                 const container = document.getElementById('video-player-container');
                 if (!container) return;
                 
                 const rect = container.getBoundingClientRect();
                 
-                // ব্রাউজারের পজিশন
-                const browserX = window.screenLeft !== undefined ? window.screenLeft : window.screenX;
-                const browserY = window.screenTop !== undefined ? window.screenTop : window.screenY;
+                // ব্রাউজারের স্ক্রিন পজিশন
+                const screenX = window.screenX !== undefined ? window.screenX : window.screenLeft;
+                const screenY = window.screenY !== undefined ? window.screenY : window.screenTop;
                 
-                // Edge/Chrome এর উপরের এড্রেসবার ও বর্ডারের আনুমানিক হিসাব
+                // ব্রাউজারের নেভিগেশন বার ও বর্ডারের সঠিক পরিমাপ
+                const chromeWidth = window.outerWidth - window.innerWidth;
                 const chromeHeight = window.outerHeight - window.innerHeight;
-                const topOffset = chromeHeight > 0 ? chromeHeight - 8 : 80; 
+                const borderX = chromeWidth > 0 ? chromeWidth / 2 : 0;
+                const borderY = chromeHeight > 0 ? chromeHeight - borderX : 0;
                 
-                // উইন্ডোর এক্স্যাক্ট মাপ ও পজিশন
-                const width = Math.round(rect.width);
-                const height = Math.round(rect.height);
-                const left = Math.round(browserX + 8 + rect.left); // 8px standard border padding
-                const top = Math.round(browserY + topOffset + rect.top);
+                // পপ-আপের এক্স্যাক্ট স্ক্রিন পজিশন
+                const left = Math.round(screenX + borderX + rect.left);
+                const top = Math.round(screenY + borderY + rect.top);
                 
-                // menubar=no, toolbar=no দিলে Edge ব্রাউজারে এড্রেসবার ও ট্যাব হাইড হয়ে যায়
-                const features = `menubar=no,toolbar=no,location=no,status=no,scrollbars=no,resizable=yes,width=${width},height=${height},left=${left},top=${top}`;
+                // মেইন ফিক্স: ব্রাউজার পপ-আপ উইন্ডোর চারদিকে নিজস্ব বর্ডার এবং উপরে টাইটেল বার (Title bar) যোগ করে। 
+                // এই কারণে আমরা শুধু width/height দিলে সেটা থিয়েটার বক্সের চেয়ে বড় হয়ে যায়।
+                // তাই আমরা থিয়েটার বক্সের মাপ থেকে পপ-আপের বর্ডার ও টাইটেল বারের মাপ (যেমন- উপরে ৩৫px, ডানে-বামে ১৬px) "বাদ" দিয়ে দিচ্ছি!
+                const popupTitleBarHeight = 35; // Windows OS title bar height
+                const popupSideBorders = 16; // 8px left + 8px right
+                
+                const width = Math.round(rect.width - popupSideBorders);
+                const height = Math.round(rect.height - popupTitleBarHeight);
+                
+                // resizable=no ব্যবহার করছি যাতে ব্রাউজার জোর করে সাইজ না বাড়ায়
+                const features = `menubar=no,toolbar=no,location=no,status=no,scrollbars=no,resizable=no,width=${width},height=${height},left=${left},top=${top}`;
                 
                 const popup = window.open(video.externalUrl, 'ExternalVideoPopup', features);
                 if (popup) popup.focus();
