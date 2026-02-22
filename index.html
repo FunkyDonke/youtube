@@ -640,20 +640,23 @@
                 const borderX = chromeWidth > 0 ? chromeWidth / 2 : 0;
                 const borderY = chromeHeight > 0 ? chromeHeight - borderX : 0;
                 
-                // পপ-আপের এক্স্যাক্ট স্ক্রিন পজিশন (হালকা ভেতর দিকে চাপিয়ে দেওয়া হলো যাতে ওভারফ্লো না হয়)
-                const left = Math.round(screenX + borderX + rect.left + 5);
-                const top = Math.round(screenY + borderY + rect.top + 5);
+                // বেসিক পজিশন (যেটার ডান এবং নিচ সঠিক ছিল)
+                const baseLeft = Math.round(screenX + borderX + rect.left);
+                const baseTop = Math.round(screenY + borderY + rect.top);
+                const baseWidth = Math.round(rect.width);
+                const baseHeight = Math.round(rect.height);
                 
-                // Edge ব্রাউজারে পপ-আপের এড্রেস বার এবং টাইটেল বার অনেক বড় হয় (প্রায় 80-90px)
-                // তাই থিয়েটার বক্স থেকে আরও বেশি জায়গা বাদ দিতে হবে যাতে এটি বক্সের বাইরে না যায়
-                const popupTitleBarHeight = 90; // Edge title bar + address bar
-                const popupSideBorders = 30; // Side borders + shadow compensation
+                // আপনার ফিডব্যাক অনুযায়ী ফিক্স: 
+                // ডান ও নিচ ঠিক রেখে উপর এবং বাম থেকে ছোট করা হচ্ছে
+                const shrinkTop = 85;  // উপর থেকে 85px ছোট করে উইন্ডোকে নিচে নামানো হলো (Edge Address bar এর জন্য)
+                const shrinkLeft = 12; // বাম থেকে 12px ছোট করে উইন্ডোকে ডানে সরানো হলো
                 
-                const width = Math.round(rect.width - popupSideBorders);
-                const height = Math.round(rect.height - popupTitleBarHeight);
+                const finalLeft = baseLeft + shrinkLeft;
+                const finalTop = baseTop + shrinkTop;
+                const finalWidth = baseWidth - shrinkLeft; 
+                const finalHeight = baseHeight - shrinkTop; 
                 
-                // resizable=yes রাখা হয়েছে, তবে সাইজ একদম পারফেক্ট দেওয়া হয়েছে
-                const features = `menubar=no,toolbar=no,location=no,status=no,scrollbars=no,resizable=yes,width=${width},height=${height},left=${left},top=${top}`;
+                const features = `menubar=no,toolbar=no,location=no,status=no,scrollbars=no,resizable=yes,width=${finalWidth},height=${finalHeight},left=${finalLeft},top=${finalTop}`;
                 
                 const popup = window.open(video.externalUrl, 'ExternalVideoPopup', features);
                 if (popup) popup.focus();
