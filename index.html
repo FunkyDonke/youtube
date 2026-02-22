@@ -43,17 +43,17 @@
 
     const initialVideos = [
       {
-        id: 'aqz-KE-bpKQ', videoId: 'aqz-KE-bpKQ', listId: null, type: 'video',
+        id: 'aqz-KE-bpKQ', videoId: 'aqz-KE-bpKQ', listId: null, type: 'video', provider: 'youtube',
         title: 'Big Buck Bunny 60fps 4K - Official Blender Foundation Short Film', channel: 'Blender', views: '12M views',
         thumbnail: 'https://img.youtube.com/vi/aqz-KE-bpKQ/hqdefault.jpg', channelAvatar: 'https://ui-avatars.com/api/?name=Blender&background=random',
       },
       {
-        id: 'LXb3EKWsInQ', videoId: 'LXb3EKWsInQ', listId: null, type: 'video',
+        id: 'LXb3EKWsInQ', videoId: 'LXb3EKWsInQ', listId: null, type: 'video', provider: 'youtube',
         title: 'COSTA RICA IN 4K 60fps HDR (ULTRA HD)', channel: 'Jacob + Katie Schwarz', views: '150M views',
         thumbnail: 'https://img.youtube.com/vi/LXb3EKWsInQ/hqdefault.jpg', channelAvatar: 'https://ui-avatars.com/api/?name=Jacob&background=random',
       },
       {
-        id: 'w7ejDZ8SWv8', videoId: 'w7ejDZ8SWv8', listId: null, type: 'video',
+        id: 'w7ejDZ8SWv8', videoId: 'w7ejDZ8SWv8', listId: null, type: 'video', provider: 'youtube',
         title: 'React JS Crash Course for Beginners', channel: 'Code Step By Step', views: '2.5M views',
         thumbnail: 'https://img.youtube.com/vi/w7ejDZ8SWv8/hqdefault.jpg', channelAvatar: 'https://ui-avatars.com/api/?name=Code&background=random',
       }
@@ -100,12 +100,83 @@
       return { videoId, listId, driveId, title };
     }
 
-    function HoverPlayer({ videoId, savedTime }) {
+    // Auto Thumbnail Generator for Local Videos
+    const generateThumbnail = (file) => {
+        return new Promise((resolve) => {
+            const video = document.createElement('video');
+            video.preload = 'metadata';
+            video.src = URL.createObjectURL(file);
+            video.muted = true;
+            video.playsInline = true;
+            
+            video.addEventListener('loadedmetadata', () => {
+                video.currentTime = Math.min(1, video.duration / 2 || 0); // ১ সেকেন্ড অথবা মাঝখানের ফ্রেম
+            });
+
+            video.addEventListener('seeked', () => {
+                try {
+                    const canvas = document.createElement('canvas');
+                    canvas.width = video.videoWidth || 640;
+                    canvas.height = video.videoHeight || 360;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                    resolve(canvas.toDataURL('image/jpeg'));
+                } catch (e) {
+                    resolve('https://placehold.co/640x360/10B981/FFFFFF/png?text=Local+Video');
+                }
+                URL.revokeObjectURL(video.src);
+            });
+
+            video.addEventListener('error', () => {
+                resolve('https://placehold.co/640x360/10B981/FFFFFF/png?text=Local+Video');
+                URL.revokeObjectURL(video.src);
+            });
+        });
+    };
+
+    function HoverPlayer({ video, savedTime, onPlay }) {
         const playerContainerRef = useRef(null);
         const playerRef = useRef(null);
 
+        // Local Video Hover Logic with Controls & Resume
+        if (video.provider === 'local') {
+            let blobUrl = video.blobUrl;
+            let currentId = video.id;
+            
+            if (video.type === 'local_playlist' && video.videoObjects?.length > 0) {
+                blobUrl = video.videoObjects[0].blobUrl;
+                currentId = video.videoObjects[0].id;
+            }
+
+            return (
+                <div className="absolute inset-0 z-10 bg-black rounded-lg overflow-hidden group/player pointer-events-auto">
+                    <video 
+                        src={blobUrl} 
+                        className="w-full h-full object-cover pointer-events-auto" 
+                        autoPlay 
+                        muted 
+                        controls
+                        onLoadedMetadata={(e) => {
+                             const times = JSON.parse(localStorage.getItem('ytCloneTimes') || '{}');
+                             if (times[currentId] && times[currentId] > 0) {
+                                 e.target.currentTime = times[currentId];
+                             }
+                        }}
+                    />
+                    <div 
+                        className="absolute top-0 left-0 right-0 bottom-[45px] z-20 cursor-pointer"
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            onPlay();
+                        }}
+                    ></div>
+                </div>
+            );
+        }
+
+        // YouTube Hover Logic
         useEffect(() => {
-            if (!window.YT) return;
+            if (!window.YT || !video.videoId) return;
             
             const playerDiv = document.createElement('div');
             playerDiv.style.width = '100%';
@@ -113,7 +184,7 @@
             playerContainerRef.current.appendChild(playerDiv);
 
             playerRef.current = new window.YT.Player(playerDiv, {
-                videoId: videoId,
+                videoId: video.videoId,
                 playerVars: { 
                     autoplay: 1, 
                     mute: 1, 
@@ -135,16 +206,22 @@
                     playerContainerRef.current.innerHTML = '';
                 }
             };
-        }, [videoId, savedTime]);
+        }, [video.videoId, savedTime]);
 
         return (
             <div className="absolute inset-0 z-10 bg-black rounded-lg overflow-hidden group/player pointer-events-auto">
                 <div className="w-full h-full pointer-events-auto" ref={playerContainerRef}></div>
+                <div 
+                    className="absolute top-0 left-0 right-0 bottom-[45px] z-20 cursor-pointer"
+                    onClick={(e) => {
+                        e.stopPropagation();
+                        onPlay();
+                    }}
+                ></div>
             </div>
         );
     }
 
-    // Helper Component for Sidebar Toggles
     function SidebarToggle({ icon, label, isExpanded, onToggle, children, isOpen, scrollable }) {
         return (
             <>
@@ -168,7 +245,9 @@
     function App() {
       const [videos, setVideos] = useState(() => {
         const saved = localStorage.getItem('ytCloneVideos');
-        return saved ? JSON.parse(saved) : initialVideos;
+        // Filter out local videos on initial load because Blob URLs expire on reload
+        let parsed = saved ? JSON.parse(saved) : initialVideos;
+        return parsed.filter(v => v.provider !== 'local');
       });
 
       const [currentVideo, setCurrentVideo] = useState(null);
@@ -195,6 +274,8 @@
       const [confirmState, setConfirmState] = useState({ isOpen: false, message: '', targetId: null });
 
       const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+      const [isLocalModalOpen, setIsLocalModalOpen] = useState(false);
+      
       const [newMediaInput, setNewMediaInput] = useState({ link: '', title: '', channel: '' });
       const [isCreateListModalOpen, setIsCreateListModalOpen] = useState(false);
       const [newListTitle, setNewListTitle] = useState('');
@@ -215,6 +296,7 @@
       const ytContainerRef = useRef(null);
       const playerRef = useRef(null);
       const timeIntervalRef = useRef(null);
+      const localVideoRef = useRef(null);
       
       const [autoPlay, setAutoPlay] = useState(false); 
 
@@ -223,16 +305,21 @@
       useEffect(() => {
         const savedHistory = localStorage.getItem('ytCloneHistory');
         const savedLastWatched = localStorage.getItem('ytCloneLastWatched');
-        if (savedHistory) setWatchHistory(JSON.parse(savedHistory));
+        if (savedHistory) {
+            let parsedHistory = JSON.parse(savedHistory).filter(v => v.provider !== 'local');
+            setWatchHistory(parsedHistory);
+        }
         if (savedLastWatched) {
             const parsed = JSON.parse(savedLastWatched);
-            setLastWatched(parsed);
-            setCurrentVideo(parsed);
-            const w = 384;
-            const h = w * (9/16) + 40;
-            setPlayerRect({ left: window.innerWidth - w - 24, top: window.innerHeight - h - 24, width: w, height: h });
-            setIsMiniplayer(true);
-            setAutoPlay(false);
+            if (parsed.provider !== 'local') {
+                setLastWatched(parsed);
+                setCurrentVideo(parsed);
+                const w = 384;
+                const h = w * (9/16) + 40;
+                setPlayerRect({ left: window.innerWidth - w - 24, top: window.innerHeight - h - 24, width: w, height: h });
+                setIsMiniplayer(true);
+                setAutoPlay(false);
+            }
         }
 
         setProgressData({
@@ -248,6 +335,7 @@
       useEffect(() => {
         let isMounted = true;
         const fetchMissingTitles = () => {
+            if(currentVideoData?.provider === 'local') return;
             playlistQueue.forEach(vidId => {
                 const existsLocally = videos.find(v => v.videoId === vidId);
                 if (!existsLocally) {
@@ -268,10 +356,10 @@
 
         if (playlistQueue.length > 0) fetchMissingTitles();
         return () => { isMounted = false; };
-      }, [playlistQueue, videos]);
+      }, [playlistQueue, videos, currentVideoData]);
 
       const handleMouseEnter = (video) => {
-          if (video.type === 'video' && video.provider !== 'gdrive' && video.videoId) {
+          if (video.type === 'video' && video.provider !== 'gdrive' && (video.videoId || video.blobUrl)) {
               hoverTimeout.current = setTimeout(() => {
                   setHoveredVideo(video.id);
               }, 600); 
@@ -281,6 +369,89 @@
       const handleMouseLeave = () => {
           if (hoverTimeout.current) clearTimeout(hoverTimeout.current);
           setHoveredVideo(null);
+      };
+
+      // Handle Local File & Folder Uploads (with Real Thumbnail Gen & Correct Filtering)
+      const handleLocalFiles = async (e, isFolder) => {
+          const files = Array.from(e.target.files).filter(f => f.type.startsWith('video/'));
+          if (files.length === 0) {
+              setAlertState({ isOpen: true, message: 'কোনো সঠিক ভিডিও ফাইল পাওয়া যায়নি!' });
+              return;
+          }
+
+          setIsLocalModalOpen(false); // Close modal
+          
+          // Temporary loading message
+          setTimeout(() => {
+              setAlertState({ isOpen: true, message: 'ফাইলগুলো প্রসেস করা হচ্ছে, দয়া করে একটু অপেক্ষা করুন...' });
+          }, 100);
+
+          let updated = [...videos];
+
+          if (isFolder && files.length > 1) {
+              const folderName = files[0].webkitRelativePath.split('/')[0] || 'লোকাল ফোল্ডার';
+              const playlistId = 'local-folder-' + Date.now();
+              
+              const vidsWithThumbs = [];
+              for(let i=0; i<files.length; i++){
+                  const f = files[i];
+                  const thumb = await generateThumbnail(f);
+                  vidsWithThumbs.push({
+                      id: playlistId + '-vid-' + i,
+                      videoId: playlistId + '-vid-' + i,
+                      title: f.name.replace(/\.[^/.]+$/, ""),
+                      channel: 'Local Storage',
+                      views: 'Local File',
+                      thumbnail: thumb,
+                      type: 'video',
+                      provider: 'local',
+                      fileObj: f,
+                      blobUrl: URL.createObjectURL(f)
+                  });
+              }
+
+              const playlist = {
+                  id: playlistId,
+                  listId: playlistId,
+                  title: folderName,
+                  channel: 'Local Storage',
+                  views: `${vidsWithThumbs.length} ভিডিও`,
+                  thumbnail: vidsWithThumbs[0]?.thumbnail || 'https://placehold.co/640x360/3B82F6/FFFFFF/png?text=Local+Folder',
+                  type: 'local_playlist',
+                  provider: 'local',
+                  videoObjects: vidsWithThumbs
+              };
+              
+              // Only add PLAYLIST to videos array, not the individual videos (keeps homepage clean)
+              updated = [playlist, ...videos];
+          } else {
+              const newVideos = [];
+              for(let i=0; i<files.length; i++){
+                  const f = files[i];
+                  const thumb = await generateThumbnail(f);
+                  newVideos.push({
+                      id: 'local-vid-' + Date.now() + '-' + i,
+                      videoId: 'local-vid-' + Date.now() + '-' + i,
+                      title: f.name.replace(/\.[^/.]+$/, ""),
+                      channel: 'Local Storage',
+                      views: 'Local File',
+                      thumbnail: thumb,
+                      type: 'video',
+                      provider: 'local',
+                      fileObj: f,
+                      blobUrl: URL.createObjectURL(f)
+                  });
+              }
+              updated = [...newVideos, ...videos];
+          }
+
+          setVideos(updated);
+          
+          // Save only non-local videos to localStorage
+          const storable = updated.filter(v => v.provider !== 'local');
+          localStorage.setItem('ytCloneVideos', JSON.stringify(storable));
+          
+          setAlertState({ isOpen: false, message: '' }); // clear processing
       };
 
       // Main YouTube Player Initialization
@@ -295,7 +466,8 @@
             return;
         }
 
-        if (currentVideo.provider === 'gdrive' || currentVideo.driveId) {
+        // Skip YouTube player for Local and GDrive videos
+        if (currentVideo.provider === 'gdrive' || currentVideo.driveId || currentVideo.provider === 'local') {
             if (playerRef.current && typeof playerRef.current.pauseVideo === 'function') {
                 playerRef.current.pauseVideo();
             }
@@ -357,7 +529,10 @@
                                                 }
                                                 return v;
                                             });
-                                            if (changed) localStorage.setItem('ytCloneVideos', JSON.stringify(updated));
+                                            if (changed) {
+                                                const storable = updated.filter(v => v.provider !== 'local');
+                                                localStorage.setItem('ytCloneVideos', JSON.stringify(storable));
+                                            }
                                             return changed ? updated : prev;
                                         });
                                     }
@@ -390,7 +565,10 @@
                                                 }
                                                 return v;
                                             });
-                                            if(changed) localStorage.setItem('ytCloneVideos', JSON.stringify(updated));
+                                            if(changed) {
+                                                const storable = updated.filter(v => v.provider !== 'local');
+                                                localStorage.setItem('ytCloneVideos', JSON.stringify(storable));
+                                            }
                                             return changed ? updated : prev;
                                         });
                                     }
@@ -449,25 +627,45 @@
         if (currentVideo && currentVideo.id === video.id) {
             setIsMiniplayer(false);
             setAutoPlay(true);
-            if (playerRef.current && typeof playerRef.current.playVideo === 'function') {
+            if (video.provider !== 'local' && playerRef.current && typeof playerRef.current.playVideo === 'function') {
                 playerRef.current.playVideo();
+            }
+            if (video.provider === 'local' && localVideoRef.current) {
+                localVideoRef.current.play();
             }
             return;
         }
 
         setAutoPlay(true); 
         setCurrentVideo(video);
-        setLastWatched(video);
         setIsMiniplayer(false); 
-        // থিয়েটার মোড অফ করা হচ্ছে না, যাতে এটি সেভ থাকে
-        setPlaylistQueue([]); 
-        setCurrentPlaylistIndex(0);
-        setIsCurrentPlaylistExpanded(true); // Auto expand current playlist in sidebar
+        
+        // Manual logic for Local Playlist Queue
+        if (video.provider === 'local' && video.type === 'local_playlist') {
+            const savedIndexes = JSON.parse(localStorage.getItem('ytClonePlaylistIndexes') || '{}');
+            const startIndex = savedIndexes[video.id] || 0;
+            
+            setPlaylistQueue(video.videoObjects.map(v => v.id));
+            setCurrentPlaylistIndex(startIndex);
+            setIsCurrentPlaylistExpanded(true);
+        } else if (video.provider !== 'local') {
+            // Let YT player handle its own queue setup mostly, but clear local states
+            setPlaylistQueue([]); 
+            setCurrentPlaylistIndex(0);
+            setIsCurrentPlaylistExpanded(true); 
+        }
 
         const updatedHistory = [video, ...watchHistory.filter(v => v.id !== video.id)].slice(0, 20);
         setWatchHistory(updatedHistory);
-        localStorage.setItem('ytCloneHistory', JSON.stringify(updatedHistory));
-        localStorage.setItem('ytCloneLastWatched', JSON.stringify(video));
+        
+        // Only save non-local videos to history to prevent broken links on reload
+        const storableHistory = updatedHistory.filter(v => v.provider !== 'local');
+        localStorage.setItem('ytCloneHistory', JSON.stringify(storableHistory));
+        
+        if (video.provider !== 'local') {
+            setLastWatched(video);
+            localStorage.setItem('ytCloneLastWatched', JSON.stringify(video));
+        }
       };
 
       const deleteMedia = (e, id) => {
@@ -478,7 +676,10 @@
       const executeDelete = () => {
         const updatedVideos = videos.filter(v => v.id !== confirmState.targetId);
         setVideos(updatedVideos);
-        localStorage.setItem('ytCloneVideos', JSON.stringify(updatedVideos));
+        
+        const storable = updatedVideos.filter(v => v.provider !== 'local');
+        localStorage.setItem('ytCloneVideos', JSON.stringify(storable));
+        
         if(currentVideo?.id === confirmState.targetId) {
             setCurrentVideo(null);
             setIsMiniplayer(false);
@@ -515,7 +716,10 @@
 
         const updatedVideos = [newMedia, ...videos];
         setVideos(updatedVideos);
-        localStorage.setItem('ytCloneVideos', JSON.stringify(updatedVideos));
+        
+        const storable = updatedVideos.filter(v => v.provider !== 'local');
+        localStorage.setItem('ytCloneVideos', JSON.stringify(storable));
+        
         setIsAddModalOpen(false);
         setNewMediaInput({ link: '', title: '', channel: '' });
       };
@@ -529,7 +733,7 @@
         
         const firstVid = videos.find(v => v.videoId === selectedVideoIds[0]);
         const newPlaylist = {
-            id: 'local-list-' + Date.now(), type: 'local_playlist', title: newListTitle || 'My Playlist',
+            id: 'local-list-' + Date.now(), type: 'local_playlist', provider: 'youtube', title: newListTitle || 'My Playlist',
             videoIds: selectedVideoIds, thumbnail: firstVid ? firstVid.thumbnail : 'https://placehold.co/640x360/222222/FFFFFF/png?text=Playlist',
             channel: 'Created by You', channelAvatar: 'https://ui-avatars.com/api/?name=User&background=random',
             views: selectedVideoIds.length + ' videos'
@@ -537,7 +741,10 @@
         
         const updated = [newPlaylist, ...videos];
         setVideos(updated);
-        localStorage.setItem('ytCloneVideos', JSON.stringify(updated));
+        
+        const storable = updated.filter(v => v.provider !== 'local');
+        localStorage.setItem('ytCloneVideos', JSON.stringify(storable));
+        
         setIsCreateListModalOpen(false);
         setNewListTitle('');
         setSelectedVideoIds([]);
@@ -551,7 +758,15 @@
 
       if (currentVideoData?.type?.includes('playlist') && playlistQueue.length > 0) {
           const activeVidId = playlistQueue[currentPlaylistIndex];
-          if (activeVidId) {
+          
+          if (currentVideoData.provider === 'local') {
+              const activeLocalVid = currentVideoData.videoObjects?.[currentPlaylistIndex];
+              if (activeLocalVid) {
+                  displayTitle = activeLocalVid.title;
+                  displayChannel = activeLocalVid.channel;
+                  displayAvatar = activeLocalVid.thumbnail;
+              }
+          } else if (activeVidId) {
               const localVidInfo = videos.find(v => v.videoId === activeVidId);
               const meta = fetchedMeta[activeVidId];
 
@@ -571,7 +786,7 @@
       }
 
       const handleDragStart = (e) => {
-        if (e.target.closest('button')) return;
+        if (e.target.closest('button') || e.target.tagName.toLowerCase() === 'input') return;
         setIsDragging(true);
         const clientX = e.type.includes('mouse') ? e.clientX : e.touches[0].clientX;
         const clientY = e.type.includes('mouse') ? e.clientY : e.touches[0].clientY;
@@ -680,11 +895,17 @@
                   </button>
                 </div>
               )}
-              <button onClick={() => setIsCreateListModalOpen(true)} className="flex items-center gap-2 px-3 py-1.5 bg-blue-600/20 hover:bg-blue-600/40 text-blue-400 rounded-full transition-colors border border-blue-500/30">
-                <i className="fas fa-folder-plus text-sm"></i><span className="text-sm font-semibold hidden md:block">প্লেলিস্ট বানান</span>
+              
+              <button onClick={() => setIsLocalModalOpen(true)} className="flex items-center gap-2 px-3 py-1.5 bg-emerald-600/20 hover:bg-emerald-600/40 text-emerald-400 rounded-full transition-colors border border-emerald-500/30">
+                <i className="fas fa-folder-open text-sm"></i><span className="text-sm font-semibold hidden md:block">লোকাল ফাইল</span>
               </button>
+
+              <button onClick={() => setIsCreateListModalOpen(true)} className="flex items-center gap-2 px-3 py-1.5 bg-blue-600/20 hover:bg-blue-600/40 text-blue-400 rounded-full transition-colors border border-blue-500/30 hidden lg:flex">
+                <i className="fas fa-folder-plus text-sm"></i><span className="text-sm font-semibold">প্লেলিস্ট বানান</span>
+              </button>
+              
               <button onClick={() => setIsAddModalOpen(true)} className="flex items-center gap-2 px-3 py-1.5 bg-white/10 hover:bg-white/20 rounded-full transition-colors border border-white/20">
-                <i className="fas fa-plus text-sm"></i><span className="text-sm font-semibold hidden md:block">যোগ করুন</span>
+                <i className="fas fa-globe text-sm"></i><span className="text-sm font-semibold hidden md:block">অনলাইন ভিডিও</span>
               </button>
             </div>
           </header>
@@ -692,13 +913,11 @@
           <div className="flex flex-1 overflow-hidden">
             <aside className={`${isSidebarOpen ? 'w-64' : 'w-20'} flex-shrink-0 hidden md:flex flex-col bg-[#0f0f0f] transition-all duration-300 overflow-y-auto px-2 py-3 border-r border-white/10 custom-scrollbar`}>
               
-              {/* Home */}
               <div onClick={() => { setCurrentVideo(null); setIsMiniplayer(false); }} className={`flex items-center ${isSidebarOpen ? 'justify-start px-3' : 'justify-center flex-col'} py-2.5 my-1 rounded-xl cursor-pointer transition-colors ${!currentVideo ? 'bg-white/10 font-bold' : 'hover:bg-white/10'}`}>
                 <div className={`flex items-center justify-center ${isSidebarOpen ? 'mr-4' : 'mb-1'} ${!currentVideo ? 'text-white' : 'text-gray-200'}`}><i className="fas fa-home text-xl"></i></div>
                 <span className={`${isSidebarOpen ? 'text-sm' : 'text-[10px]'} ${!currentVideo ? 'text-white font-semibold' : 'text-gray-200'}`}>হোম</span>
               </div>
               
-              {/* All Videos Toggle */}
               <SidebarToggle icon={<i className="fas fa-video text-xl"></i>} label="সকল ভিডিও" isExpanded={isAllVideosExpanded} onToggle={() => setIsAllVideosExpanded(!isAllVideosExpanded)} isOpen={isSidebarOpen} scrollable={true}>
                   {videos.filter(v => v.type === 'video').length === 0 && <p className="text-xs text-gray-500 pl-1">কোনো ভিডিও নেই</p>}
                   {videos.filter(v => v.type === 'video').map((video, idx) => {
@@ -724,7 +943,6 @@
                   })}
               </SidebarToggle>
 
-              {/* All Playlists Toggle */}
               <SidebarToggle icon={<i className="fas fa-layer-group text-xl"></i>} label="সকল প্লেলিস্ট" isExpanded={isAllPlaylistsExpanded} onToggle={() => setIsAllPlaylistsExpanded(!isAllPlaylistsExpanded)} isOpen={isSidebarOpen} scrollable={true}>
                   {videos.filter(v => v.type.includes('playlist')).length === 0 && <p className="text-xs text-gray-500 pl-1">কোনো প্লেলিস্ট নেই</p>}
                   {videos.filter(v => v.type.includes('playlist')).map((video, idx) => {
@@ -743,46 +961,66 @@
                   })}
               </SidebarToggle>
 
-              {/* Current Playlist Toggle (Only visible if a playlist is active) */}
               {currentVideoData?.type?.includes('playlist') && playlistQueue.length > 0 && (
                   <>
                   <hr className="border-white/10 my-2" />
                   <SidebarToggle icon={<i className="fas fa-play-circle text-xl text-blue-400"></i>} label="বর্তমান প্লেলিস্ট" isExpanded={isCurrentPlaylistExpanded} onToggle={() => setIsCurrentPlaylistExpanded(!isCurrentPlaylistExpanded)} isOpen={isSidebarOpen} scrollable={true}>
                       {playlistQueue.map((vidId, index) => {
                           const isPlaying = index === currentPlaylistIndex;
-                          const localVidInfo = videos.find(v => v.videoId === vidId);
-                          const meta = fetchedMeta[vidId];
                           let title = `ভিডিও ${index + 1}`;
                           let channel = 'YouTube';
-
-                          if (localVidInfo) {
-                              title = localVidInfo.title;
-                              channel = localVidInfo.channel;
-                          } else if (meta && meta.title) {
-                              title = meta.title;
-                              channel = meta.channel;
-                          } else if (meta && meta.loading) {
-                              title = 'লোড হচ্ছে...';
-                          }
-
+                          let thumbnail = `https://img.youtube.com/vi/${vidId}/mqdefault.jpg`;
+                          
                           let progressPercent = 0;
-                          if (localVidInfo) {
-                              const watchedSec = progressData.times[localVidInfo.id] || 0;
-                              const totalSec = progressData.durations[localVidInfo.id] || 0;
-                              progressPercent = totalSec > 0 ? Math.min((watchedSec / totalSec) * 100, 100) : 0;
+
+                          if (currentVideoData.provider === 'local') {
+                              const localVidInfo = currentVideoData.videoObjects?.[index];
+                              if (localVidInfo) {
+                                  title = localVidInfo.title;
+                                  channel = localVidInfo.channel;
+                                  thumbnail = localVidInfo.thumbnail;
+                                  const watchedSec = progressData.times[localVidInfo.id] || 0;
+                                  const totalSec = progressData.durations[localVidInfo.id] || 0;
+                                  progressPercent = totalSec > 0 ? Math.min((watchedSec / totalSec) * 100, 100) : 0;
+                              }
+                          } else {
+                              const localVidInfo = videos.find(v => v.videoId === vidId);
+                              const meta = fetchedMeta[vidId];
+                              if (localVidInfo) {
+                                  title = localVidInfo.title;
+                                  channel = localVidInfo.channel;
+                                  const watchedSec = progressData.times[localVidInfo.id] || 0;
+                                  const totalSec = progressData.durations[localVidInfo.id] || 0;
+                                  progressPercent = totalSec > 0 ? Math.min((watchedSec / totalSec) * 100, 100) : 0;
+                              } else if (meta && meta.title) {
+                                  title = meta.title;
+                                  channel = meta.channel;
+                              } else if (meta && meta.loading) {
+                                  title = 'লোড হচ্ছে...';
+                              }
                           }
 
                           return (
                               <div 
                                   key={index} 
-                                  onClick={() => playerRef.current?.playVideoAt(index)}
+                                  onClick={() => {
+                                      if (currentVideoData.provider === 'local') {
+                                          setCurrentPlaylistIndex(index);
+                                          // Update Play Index
+                                          const indexes = JSON.parse(localStorage.getItem('ytClonePlaylistIndexes') || '{}');
+                                          indexes[currentVideoData.id] = index;
+                                          localStorage.setItem('ytClonePlaylistIndexes', JSON.stringify(indexes));
+                                      } else {
+                                          playerRef.current?.playVideoAt(index);
+                                      }
+                                  }}
                                   className={`flex gap-2 cursor-pointer hover:bg-white/10 p-1.5 rounded-lg transition-colors group ${isPlaying ? 'bg-white/20 border border-white/10' : ''}`}
                               >
                                   <div className="text-[10px] text-gray-400 w-3 flex items-center justify-center">
                                       {isPlaying ? <i className="fas fa-play text-white"></i> : index + 1}
                                   </div>
                                   <div className="w-16 h-10 relative flex-shrink-0 bg-black rounded overflow-hidden border border-white/10">
-                                      <img src={`https://img.youtube.com/vi/${vidId}/mqdefault.jpg`} className="w-full h-full object-cover" />
+                                      <img src={thumbnail} className="w-full h-full object-cover" />
                                       {progressPercent > 0 && (
                                           <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-gray-600/80">
                                               <div className="h-full bg-red-600" style={{ width: `${progressPercent}%` }}></div>
@@ -802,7 +1040,6 @@
 
               {isSidebarOpen && <hr className="border-white/10 my-2" />}
               
-              {/* History Toggle */}
               <SidebarToggle icon={<i className="fas fa-history text-xl"></i>} label="ইতিহাস" isExpanded={isHistoryExpanded} onToggle={() => setIsHistoryExpanded(!isHistoryExpanded)} isOpen={isSidebarOpen} scrollable={true}>
                   {watchHistory.length === 0 ? (
                     <p className="text-xs text-gray-500 pl-1">কোনো ইতিহাস নেই</p>
@@ -847,6 +1084,7 @@
                           <div className="flex flex-col truncate pr-2 w-[75%]">
                             <span className="text-sm font-bold truncate text-white">
                                 {currentVideoData?.provider === 'gdrive' && <i className="fab fa-google-drive mr-2 text-blue-400"></i>}
+                                {currentVideoData?.provider === 'local' && <i className="fas fa-hdd mr-2 text-emerald-400"></i>}
                                 {currentVideoData?.type?.includes('playlist') && <i className="fas fa-play mr-2 text-gray-400 text-[10px]"></i>}
                                 {displayTitle}
                             </span>
@@ -873,9 +1111,53 @@
                                   allowFullScreen
                               ></iframe>
                           )}
+
+                          {currentVideoData?.provider === 'local' && (
+                              <video 
+                                  ref={localVideoRef}
+                                  src={currentVideoData.type === 'local_playlist' ? currentVideoData.videoObjects[currentPlaylistIndex]?.blobUrl : currentVideoData.blobUrl} 
+                                  className="w-full h-full object-contain absolute inset-0 z-0 outline-none" 
+                                  controls
+                                  autoPlay
+                                  onLoadedMetadata={(e) => {
+                                      const vidId = currentVideoData.type === 'local_playlist' ? currentVideoData.videoObjects[currentPlaylistIndex].id : currentVideoData.id;
+                                      const times = JSON.parse(localStorage.getItem('ytCloneTimes') || '{}');
+                                      if (times[vidId] && times[vidId] > 0) {
+                                          e.target.currentTime = times[vidId];
+                                      }
+                                  }}
+                                  onEnded={() => {
+                                      if (currentVideoData.type === 'local_playlist' && currentPlaylistIndex < currentVideoData.videoObjects.length - 1) {
+                                          const nextIdx = currentPlaylistIndex + 1;
+                                          setCurrentPlaylistIndex(nextIdx);
+                                          
+                                          const indexes = JSON.parse(localStorage.getItem('ytClonePlaylistIndexes') || '{}');
+                                          indexes[currentVideoData.id] = nextIdx;
+                                          localStorage.setItem('ytClonePlaylistIndexes', JSON.stringify(indexes));
+                                      }
+                                  }}
+                                  onTimeUpdate={(e) => {
+                                      const time = Math.floor(e.target.currentTime);
+                                      const duration = Math.floor(e.target.duration);
+                                      const vidId = currentVideoData.type === 'local_playlist' ? currentVideoData.videoObjects[currentPlaylistIndex].id : currentVideoData.id;
+                                      
+                                      setProgressData(prev => ({
+                                          times: { ...prev.times, [vidId]: time },
+                                          durations: { ...prev.durations, [vidId]: duration }
+                                      }));
+
+                                      // Save strictly to local storage
+                                      const storedTimes = JSON.parse(localStorage.getItem('ytCloneTimes') || '{}');
+                                      const storedDurations = JSON.parse(localStorage.getItem('ytCloneDurations') || '{}');
+                                      storedTimes[vidId] = time;
+                                      storedDurations[vidId] = duration;
+                                      localStorage.setItem('ytCloneTimes', JSON.stringify(storedTimes));
+                                      localStorage.setItem('ytCloneDurations', JSON.stringify(storedDurations));
+                                  }}
+                              ></video>
+                          )}
                         </div>
 
-                        {/* Theater Mode Exit Button (Overlay) - Moved to Bottom Right inside the video */}
                         {isTheaterMode && !isMiniplayer && (
                             <button onClick={() => setIsTheaterMode(false)} className="absolute bottom-[70px] right-6 z-50 bg-black/80 hover:bg-black text-white px-5 py-2.5 rounded-md flex items-center gap-2 transition-all backdrop-blur-sm border border-white/20 opacity-0 group-hover:opacity-100 shadow-xl font-medium text-sm">
                                 <i className="fas fa-compress"></i> সাধারণ ভিউ
@@ -901,6 +1183,7 @@
                   <div className={`${(isMiniplayer || isTheaterMode) ? 'hidden' : 'block'}`}>
                     <h1 className="text-xl md:text-2xl font-bold mt-4 mb-1">
                         {currentVideoData?.provider === 'gdrive' && <span className="bg-blue-600/20 text-blue-400 text-xs px-2 py-1 rounded mr-2 align-middle border border-blue-500/30"><i className="fab fa-google-drive"></i> Google Drive</span>}
+                        {currentVideoData?.provider === 'local' && <span className="bg-emerald-600/20 text-emerald-400 text-xs px-2 py-1 rounded mr-2 align-middle border border-emerald-500/30"><i className="fas fa-hdd"></i> Local File</span>}
                         {displayTitle}
                     </h1>
                     {currentVideoData?.type?.includes('playlist') && (
@@ -940,33 +1223,51 @@
                           <div className="overflow-y-auto flex-1 p-2 flex flex-col gap-1 custom-scrollbar">
                               {playlistQueue.map((vidId, index) => {
                                   const isPlaying = index === currentPlaylistIndex;
-                                  const localVidInfo = videos.find(v => v.videoId === vidId);
-                                  const meta = fetchedMeta[vidId];
-                                  
                                   let title = `ভিডিও ${index + 1}`;
                                   let channel = 'YouTube';
+                                  let thumbnail = `https://img.youtube.com/vi/${vidId}/mqdefault.jpg`;
 
-                                  if (localVidInfo) {
-                                      title = localVidInfo.title;
-                                      channel = localVidInfo.channel;
-                                  } else if (meta && meta.title) {
-                                      title = meta.title;
-                                      channel = meta.channel;
-                                  } else if (meta && meta.loading) {
-                                      title = 'লোড হচ্ছে...';
+                                  if (currentVideoData.provider === 'local') {
+                                      const localVidInfo = currentVideoData.videoObjects?.[index];
+                                      if (localVidInfo) {
+                                          title = localVidInfo.title;
+                                          channel = localVidInfo.channel;
+                                          thumbnail = localVidInfo.thumbnail;
+                                      }
+                                  } else {
+                                      const localVidInfo = videos.find(v => v.videoId === vidId);
+                                      const meta = fetchedMeta[vidId];
+                                      if (localVidInfo) {
+                                          title = localVidInfo.title;
+                                          channel = localVidInfo.channel;
+                                      } else if (meta && meta.title) {
+                                          title = meta.title;
+                                          channel = meta.channel;
+                                      } else if (meta && meta.loading) {
+                                          title = 'লোড হচ্ছে...';
+                                      }
                                   }
 
                                   return (
                                       <div 
                                         key={index} 
-                                        onClick={() => playerRef.current?.playVideoAt(index)}
+                                        onClick={() => {
+                                            if (currentVideoData.provider === 'local') {
+                                                setCurrentPlaylistIndex(index);
+                                                const indexes = JSON.parse(localStorage.getItem('ytClonePlaylistIndexes') || '{}');
+                                                indexes[currentVideoData.id] = index;
+                                                localStorage.setItem('ytClonePlaylistIndexes', JSON.stringify(indexes));
+                                            } else {
+                                                playerRef.current?.playVideoAt(index);
+                                            }
+                                        }}
                                         className={`flex gap-3 p-2 rounded-lg cursor-pointer transition items-center ${isPlaying ? 'bg-white/20' : 'hover:bg-white/10'}`}
                                       >
                                           <div className="text-xs text-gray-400 w-4 text-center">
                                               {isPlaying ? <i className="fas fa-play text-white text-[10px]"></i> : index + 1}
                                           </div>
-                                          <div className="w-24 h-14 flex-shrink-0 relative rounded overflow-hidden bg-black">
-                                              <img src={`https://img.youtube.com/vi/${vidId}/mqdefault.jpg`} className="w-full h-full object-cover" />
+                                          <div className="w-24 h-14 flex-shrink-0 relative rounded overflow-hidden bg-black border border-white/10">
+                                              <img src={thumbnail} className="w-full h-full object-cover" />
                                           </div>
                                           <div className="flex flex-col justify-center overflow-hidden pr-2">
                                               <h4 className={`text-sm font-semibold line-clamp-2 leading-snug ${isPlaying ? 'text-white' : 'text-gray-300'}`}>{title}</h4>
@@ -992,7 +1293,6 @@
                             onMouseEnter={() => handleMouseEnter(video)}
                             onMouseLeave={handleMouseLeave}
                           >
-                            {/* TOP-LEFT Delete Button to avoid Native YouTube Controls */}
                             <button 
                               onClick={(e) => deleteMedia(e, video.id)}
                               className="absolute top-1 left-1 bg-black/80 hover:bg-red-600 text-white w-6 h-6 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition z-30 shadow-lg"
@@ -1003,9 +1303,8 @@
 
                             <img src={video.thumbnail} alt={video.title} onClick={() => playVideo(video)} className={`w-full h-full object-cover transition duration-300 cursor-pointer ${hoveredVideo === video.id ? 'opacity-0' : 'opacity-100'}`} />
                             
-                            {hoveredVideo === video.id && <HoverPlayer videoId={video.videoId} savedTime={watchedSec} />}
+                            {hoveredVideo === video.id && <HoverPlayer video={video} savedTime={watchedSec} onPlay={() => playVideo(video)} />}
 
-                            {/* Red Progress Bar */}
                             {progressPercent > 0 && hoveredVideo !== video.id && (
                                 <div className="absolute bottom-0 left-0 right-0 h-1 bg-gray-600/80 z-20 pointer-events-none">
                                     <div className="h-full bg-red-600" style={{ width: `${progressPercent}%` }}></div>
@@ -1030,7 +1329,6 @@
 
               <div className={`p-4 sm:p-6 lg:p-8 max-w-[1800px] mx-auto ${(!currentVideo || isMiniplayer) ? 'block' : 'hidden'}`}>
                 
-                {/* Search Header */}
                 <div className="mb-6">
                   {searchQuery && <h2 className="text-xl font-bold">"{searchQuery}" এর ফলাফল</h2>}
                 </div>
@@ -1043,7 +1341,6 @@
 
                       return (
                         <div key={`${video.id}-${index}`} className="flex flex-col group relative">
-                          {/* TOP-LEFT Delete Button to avoid Native YouTube Controls */}
                           <button 
                             onClick={(e) => deleteMedia(e, video.id)}
                             className="absolute top-2 left-2 bg-black/80 hover:bg-red-600 text-white w-8 h-8 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition z-30 shadow-lg"
@@ -1059,9 +1356,8 @@
                           >
                             <img src={video.thumbnail} alt={video.title} onClick={() => playVideo(video)} className={`w-full h-full object-cover transition duration-300 ${hoveredVideo === video.id ? 'opacity-0' : 'opacity-100'}`} />
                             
-                            {hoveredVideo === video.id && <HoverPlayer videoId={video.videoId} savedTime={watchedSec} />}
+                            {hoveredVideo === video.id && <HoverPlayer video={video} savedTime={watchedSec} onPlay={() => playVideo(video)} />}
 
-                            {/* Red Progress Bar */}
                             {progressPercent > 0 && hoveredVideo !== video.id && (
                                 <div className="absolute bottom-0 left-0 right-0 h-1 bg-gray-600/80 z-20 pointer-events-none">
                                     <div className="h-full bg-red-600" style={{ width: `${progressPercent}%` }}></div>
@@ -1075,7 +1371,6 @@
                             )}
                           </div>
                           
-                          {/* Clickable Title Area to open video */}
                           <div className="flex gap-3 pr-2 cursor-pointer" onClick={() => playVideo(video)}>
                             <img src={video.channelAvatar} alt={video.channel} className="w-9 h-9 rounded-full mt-1 flex-shrink-0" />
                             <div>
@@ -1092,13 +1387,64 @@
             </main>
           </div>
 
+          {/* Local Modal (File & Folder Upload) */}
+          {isLocalModalOpen && (
+            <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm">
+                <div className="bg-[#212121] rounded-2xl w-full max-w-lg border border-gray-700 shadow-2xl overflow-hidden">
+                    <div className="flex justify-between items-center p-4 border-b border-gray-700">
+                        <h2 className="text-xl font-bold">লোকাল ফাইল বা ফোল্ডার যোগ করুন</h2>
+                        <button onClick={() => setIsLocalModalOpen(false)} className="text-gray-400 hover:text-white"><i className="fas fa-times text-xl"></i></button>
+                    </div>
+                    <div className="p-6 flex flex-col gap-6">
+                        <div className="bg-[#121212] p-5 rounded-xl border border-gray-600 flex flex-col items-center justify-center gap-3 hover:bg-white/5 transition relative cursor-pointer">
+                            <i className="fas fa-video text-3xl text-emerald-400"></i>
+                            <div className="text-center">
+                                <h3 className="font-bold mb-1">ভিডিও ফাইল নির্বাচন করুন</h3>
+                                <p className="text-xs text-gray-400">এক বা একাধিক .mp4, .webm ফাইল</p>
+                            </div>
+                            <input 
+                                type="file" 
+                                accept="video/*" 
+                                multiple 
+                                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                                onChange={(e) => handleLocalFiles(e, false)}
+                            />
+                        </div>
+                        
+                        <div className="bg-[#121212] p-5 rounded-xl border border-gray-600 flex flex-col items-center justify-center gap-3 hover:bg-white/5 transition relative cursor-pointer">
+                            <i className="fas fa-folder-open text-3xl text-blue-400"></i>
+                            <div className="text-center">
+                                <h3 className="font-bold mb-1">পুরো ফোল্ডার নির্বাচন করুন</h3>
+                                <p className="text-xs text-gray-400">ফোল্ডারের ভিডিওগুলো প্লেলিস্ট হবে</p>
+                            </div>
+                            <input 
+                                type="file" 
+                                accept="video/*" 
+                                webkitdirectory="true" 
+                                directory="true" 
+                                multiple 
+                                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                                onChange={(e) => handleLocalFiles(e, true)}
+                            />
+                        </div>
+                        
+                        <p className="text-[11px] text-gray-400 text-center">
+                            <i className="fas fa-info-circle mr-1 text-yellow-500"></i> 
+                            ব্রাউজারের সিকিউরিটি রুল অনুযায়ী পেজ রিলোড দিলে লোকাল ফাইলগুলো মুছে যাবে।
+                        </p>
+                    </div>
+                </div>
+            </div>
+          )}
+
+          {/* Other Modals (Online Add, Alert, Confirm, Create Playlist) ... */}
           {alertState.isOpen && (
             <div className="fixed inset-0 z-[300] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm transition-opacity">
                 <div className="bg-[#212121] rounded-2xl w-full max-w-sm border border-gray-700 shadow-2xl p-6 text-center transform transition-all scale-100">
                     <div className="w-16 h-16 bg-red-500/10 rounded-full flex items-center justify-center mx-auto mb-4 border border-red-500/20">
                         <i className="fas fa-exclamation-triangle text-2xl text-red-500"></i>
                     </div>
-                    <h2 className="text-xl font-bold mb-2">সতর্কতা</h2>
+                    <h2 className="text-xl font-bold mb-2">অ্যালার্ট</h2>
                     <p className="text-gray-400 mb-6">{alertState.message}</p>
                     <button onClick={() => setAlertState({isOpen: false, message: ''})} className="bg-blue-600 hover:bg-blue-500 text-white px-6 py-2.5 rounded-full font-bold transition w-full">
                         ঠিক আছে
@@ -1131,13 +1477,13 @@
             <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm">
                 <div className="bg-[#212121] rounded-2xl w-full max-w-lg border border-gray-700 shadow-2xl">
                     <div className="flex justify-between items-center p-4 border-b border-gray-700">
-                        <h2 className="text-xl font-bold">ভিডিও বা প্লেলিস্ট যোগ করুন</h2>
+                        <h2 className="text-xl font-bold">অনলাইন ভিডিও যোগ করুন</h2>
                         <button onClick={() => setIsAddModalOpen(false)} className="text-gray-400 hover:text-white"><i className="fas fa-times text-xl"></i></button>
                     </div>
                     <form onSubmit={handleAddSubmit} className="p-4 flex flex-col gap-4">
                         <div>
-                            <label className="block text-sm text-gray-400 mb-1">ইউটিউব বা গুগল ড্রাইভ লিংক/এমবেড কোড (বাধ্যতামূলক)</label>
-                            <input type="text" required placeholder='যেমন: https://youtube.com/... বা https://drive.google.com/...' className="w-full bg-[#121212] border border-gray-600 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-blue-500" value={newMediaInput.link} onChange={(e) => setNewMediaInput({...newMediaInput, link: e.target.value})} />
+                            <label className="block text-sm text-gray-400 mb-1">ইউটিউব বা গুগল ড্রাইভ লিংক/এমবেড কোড</label>
+                            <input type="text" required placeholder='যেমন: https://youtube.com/...' className="w-full bg-[#121212] border border-gray-600 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-blue-500" value={newMediaInput.link} onChange={(e) => setNewMediaInput({...newMediaInput, link: e.target.value})} />
                         </div>
                         <div>
                             <label className="block text-sm text-gray-400 mb-1">টাইটেল (খালি রাখলে নিজে থেকেই তৈরি হবে)</label>
@@ -1160,7 +1506,7 @@
             <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm">
                 <div className="bg-[#212121] rounded-2xl w-full max-w-lg border border-gray-700 shadow-2xl">
                     <div className="flex justify-between items-center p-4 border-b border-gray-700">
-                        <h2 className="text-xl font-bold">নতুন প্লেলিস্ট বানান</h2>
+                        <h2 className="text-xl font-bold">নতুন কাস্টম প্লেলিস্ট বানান</h2>
                         <button onClick={() => setIsCreateListModalOpen(false)} className="text-gray-400 hover:text-white"><i className="fas fa-times text-xl"></i></button>
                     </div>
                     <form onSubmit={handleCreatePlaylist} className="p-4 flex flex-col gap-4">
@@ -1171,8 +1517,8 @@
                         <div>
                             <label className="block text-sm text-gray-400 mb-1">ভিডিও সিলেক্ট করুন</label>
                             <div className="max-h-60 overflow-y-auto bg-[#121212] rounded-lg p-2 flex flex-col gap-1 border border-gray-600 custom-scrollbar">
-                                {videos.filter(v => v.type === 'video' && v.provider !== 'gdrive').length === 0 && <p className="text-center text-gray-400 py-4 text-sm">কোনো ইউটিউব ভিডিও নেই। আগে ভিডিও যোগ করুন!</p>}
-                                {videos.filter(v => v.type === 'video' && v.provider !== 'gdrive').map(v => (
+                                {videos.filter(v => v.type === 'video' && v.provider !== 'gdrive' && v.provider !== 'local').length === 0 && <p className="text-center text-gray-400 py-4 text-sm">কোনো ইউটিউব ভিডিও নেই। আগে ভিডিও যোগ করুন!</p>}
+                                {videos.filter(v => v.type === 'video' && v.provider !== 'gdrive' && v.provider !== 'local').map(v => (
                                     <label key={v.id} className="flex items-center gap-3 p-2 hover:bg-white/10 rounded cursor-pointer transition">
                                         <input type="checkbox" checked={selectedVideoIds.includes(v.videoId)} onChange={(e) => { if(e.target.checked) setSelectedVideoIds([...selectedVideoIds, v.videoId]); else setSelectedVideoIds(selectedVideoIds.filter(id => id !== v.videoId)); }} className="w-4 h-4 rounded border-gray-500 bg-black cursor-pointer" />
                                         <img src={v.thumbnail} className="w-12 h-8 object-cover rounded" />
