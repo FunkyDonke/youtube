@@ -63,6 +63,7 @@
       let videoId = null;
       let listId = null;
       let driveId = null;
+      let externalUrl = null;
       let title = '';
       let urlStr = input.replace(/&amp;/g, '&');
 
@@ -74,6 +75,12 @@
       if(title.toLowerCase() === 'youtube video player' || title.toLowerCase() === 'custom video') title = ''; 
 
       try {
+        // Google Photos / External Link Detection
+        if (urlStr.includes('photos.app.goo.gl') || urlStr.includes('photos.google.com')) {
+            externalUrl = urlStr;
+            return { videoId, listId, driveId, externalUrl, title };
+        }
+
         if (urlStr.includes('drive.google.com')) {
             const driveMatch = urlStr.match(/\/d\/([a-zA-Z0-9_-]+)/);
             if (driveMatch) driveId = driveMatch[1];
@@ -359,7 +366,7 @@
       }, [playlistQueue, videos, currentVideoData]);
 
       const handleMouseEnter = (video) => {
-          if (video.type === 'video' && video.provider !== 'gdrive' && (video.videoId || video.blobUrl)) {
+          if (video.type === 'video' && video.provider !== 'gdrive' && video.provider !== 'external' && (video.videoId || video.blobUrl)) {
               hoverTimeout.current = setTimeout(() => {
                   setHoveredVideo(video.id);
               }, 600); 
@@ -624,6 +631,29 @@
       };
 
       const playVideo = (video) => {
+        // External Video (Google Photos) Logic - Open in Popup Window
+        if (video.provider === 'external') {
+            // পপ-আপ উইন্ডোর সাইজ এবং পজিশন নির্ধারণ
+            const popupWidth = 800;
+            const popupHeight = 500;
+            const left = (window.innerWidth / 2) - (popupWidth / 2) + window.screenX;
+            const top = (window.innerHeight / 2) - (popupHeight / 2) + window.screenY;
+            
+            // নতুন ট্যাবের বদলে পপ-আপ উইন্ডো ওপেন করা
+            window.open(
+                video.externalUrl, 
+                'ExternalVideoPopup', 
+                `width=${popupWidth},height=${popupHeight},left=${left},top=${top},resizable=yes,scrollbars=yes,status=yes`
+            );
+            
+            // Add to history even if opened externally
+            const updatedHistory = [video, ...watchHistory.filter(v => v.id !== video.id)].slice(0, 20);
+            setWatchHistory(updatedHistory);
+            const storableHistory = updatedHistory.filter(v => v.provider !== 'local');
+            localStorage.setItem('ytCloneHistory', JSON.stringify(storableHistory));
+            return; // Stop here, don't load in main player
+        }
+
         if (currentVideo && currentVideo.id === video.id) {
             setIsMiniplayer(false);
             setAutoPlay(true);
@@ -689,28 +719,29 @@
 
       const handleAddSubmit = (e) => {
         e.preventDefault();
-        const { videoId, listId, driveId, title: extractedTitle } = parseMediaInput(newMediaInput.link);
+        const { videoId, listId, driveId, externalUrl, title: extractedTitle } = parseMediaInput(newMediaInput.link);
         
-        if (!videoId && !listId && !driveId) {
-            setAlertState({ isOpen: true, message: 'দয়া করে একটি সঠিক ইউটিউব বা গুগল ড্রাইভ লিংক/এমবেড কোড দিন।' });
+        if (!videoId && !listId && !driveId && !externalUrl) {
+            setAlertState({ isOpen: true, message: 'দয়া করে একটি সঠিক ইউটিউব, গুগল ড্রাইভ বা গুগল ফটোজ লিংক দিন।' });
             return;
         }
 
-        const id = driveId ? driveId : (listId ? listId : videoId);
-        const type = driveId ? 'video' : (listId ? 'playlist' : 'video');
-        const provider = driveId ? 'gdrive' : 'youtube';
+        const id = externalUrl ? 'ext-' + Date.now() : (driveId ? driveId : (listId ? listId : videoId));
+        const type = listId ? 'playlist' : 'video';
+        const provider = externalUrl ? 'external' : (driveId ? 'gdrive' : 'youtube');
         
         let finalTitle = newMediaInput.title || extractedTitle;
-        if (!finalTitle) finalTitle = driveId ? 'Google Drive Video' : (type === 'playlist' ? 'YouTube Playlist' : 'YouTube Video');
+        if (!finalTitle) finalTitle = externalUrl ? 'Google Photos Video' : (driveId ? 'Google Drive Video' : (type === 'playlist' ? 'YouTube Playlist' : 'YouTube Video'));
 
         let thumbnail = 'https://placehold.co/640x360/222222/FFFFFF/png?text=Media';
-        if (driveId) thumbnail = 'https://placehold.co/640x360/1a73e8/FFFFFF/png?text=Google+Drive+Video';
+        if (externalUrl) thumbnail = 'https://placehold.co/640x360/DB4437/FFFFFF/png?text=Google+Photos';
+        else if (driveId) thumbnail = 'https://placehold.co/640x360/1a73e8/FFFFFF/png?text=Google+Drive';
         else if (videoId) thumbnail = `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`;
         else if (listId) thumbnail = 'https://placehold.co/640x360/222222/FFFFFF/png?text=YouTube+Playlist';
 
         const newMedia = {
-            id: id, videoId, listId, driveId, type, provider, title: finalTitle,
-            channel: newMediaInput.channel || 'Added by User', views: '0 views', thumbnail,
+            id: id, videoId, listId, driveId, externalUrl, type, provider, title: finalTitle,
+            channel: newMediaInput.channel || 'Added by User', views: externalUrl ? 'External Link' : '0 views', thumbnail,
             channelAvatar: `https://ui-avatars.com/api/?name=${newMediaInput.channel || 'User'}&background=random`,
         };
 
@@ -1316,6 +1347,13 @@
                                     <i className="fas fa-list text-[10px]"></i> Playlist
                                 </div>
                             )}
+
+                            {/* External Link Badge for Recommendations */}
+                            {video.provider === 'external' && (
+                                <div className="absolute top-1 right-1 bg-red-600/90 text-white text-[10px] px-1.5 py-0.5 rounded font-medium flex items-center gap-1 z-20 pointer-events-none shadow-lg">
+                                    <i className="fas fa-external-link-alt"></i> Photos
+                                </div>
+                            )}
                           </div>
                           <div className="flex flex-col pr-6" onClick={() => playVideo(video)}>
                             <h4 className="text-sm font-semibold line-clamp-2 group-hover:text-blue-400">{video.title}</h4>
@@ -1367,6 +1405,13 @@
                             {video.type.includes('playlist') && (
                                 <div className="absolute bottom-1.5 right-1.5 bg-black/80 text-xs px-2 py-0.5 rounded font-medium flex items-center gap-1 z-20 pointer-events-none">
                                     <i className="fas fa-list"></i> Playlist
+                                </div>
+                            )}
+
+                            {/* External Link Badge for Main Grid */}
+                            {video.provider === 'external' && (
+                                <div className="absolute top-2 right-2 bg-red-600/90 text-white text-[10px] px-2 py-1 rounded font-medium flex items-center gap-1 z-20 pointer-events-none shadow-lg">
+                                    <i className="fas fa-external-link-alt"></i> Photos
                                 </div>
                             )}
                           </div>
@@ -1482,8 +1527,8 @@
                     </div>
                     <form onSubmit={handleAddSubmit} className="p-4 flex flex-col gap-4">
                         <div>
-                            <label className="block text-sm text-gray-400 mb-1">ইউটিউব বা গুগল ড্রাইভ লিংক/এমবেড কোড</label>
-                            <input type="text" required placeholder='যেমন: https://youtube.com/...' className="w-full bg-[#121212] border border-gray-600 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-blue-500" value={newMediaInput.link} onChange={(e) => setNewMediaInput({...newMediaInput, link: e.target.value})} />
+                            <label className="block text-sm text-gray-400 mb-1">ইউটিউব, ড্রাইভ বা ফটোজ লিংক/এমবেড কোড</label>
+                            <input type="text" required placeholder='যেমন: https://photos.app.goo.gl/...' className="w-full bg-[#121212] border border-gray-600 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-blue-500" value={newMediaInput.link} onChange={(e) => setNewMediaInput({...newMediaInput, link: e.target.value})} />
                         </div>
                         <div>
                             <label className="block text-sm text-gray-400 mb-1">টাইটেল (খালি রাখলে নিজে থেকেই তৈরি হবে)</label>
