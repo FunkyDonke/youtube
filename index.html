@@ -75,7 +75,6 @@
       if(title.toLowerCase() === 'youtube video player' || title.toLowerCase() === 'custom video') title = ''; 
 
       try {
-        // Google Photos / External Link Detection
         if (urlStr.includes('photos.app.goo.gl') || urlStr.includes('photos.google.com')) {
             externalUrl = urlStr;
             return { videoId, listId, driveId, externalUrl, title };
@@ -104,10 +103,9 @@
       } catch (e) {
         console.error("URL Error", e);
       }
-      return { videoId, listId, driveId, title };
+      return { videoId, listId, driveId, externalUrl, title };
     }
 
-    // Auto Thumbnail Generator for Local Videos
     const generateThumbnail = (file) => {
         return new Promise((resolve) => {
             const video = document.createElement('video');
@@ -117,7 +115,7 @@
             video.playsInline = true;
             
             video.addEventListener('loadedmetadata', () => {
-                video.currentTime = Math.min(1, video.duration / 2 || 0); // ১ সেকেন্ড অথবা মাঝখানের ফ্রেম
+                video.currentTime = Math.min(1, video.duration / 2 || 0); 
             });
 
             video.addEventListener('seeked', () => {
@@ -145,7 +143,6 @@
         const playerContainerRef = useRef(null);
         const playerRef = useRef(null);
 
-        // Local Video Hover Logic with Controls & Resume
         if (video.provider === 'local') {
             let blobUrl = video.blobUrl;
             let currentId = video.id;
@@ -181,7 +178,6 @@
             );
         }
 
-        // YouTube Hover Logic
         useEffect(() => {
             if (!window.YT || !video.videoId) return;
             
@@ -252,7 +248,6 @@
     function App() {
       const [videos, setVideos] = useState(() => {
         const saved = localStorage.getItem('ytCloneVideos');
-        // Filter out local videos on initial load because Blob URLs expire on reload
         let parsed = saved ? JSON.parse(saved) : initialVideos;
         return parsed.filter(v => v.provider !== 'local');
       });
@@ -264,13 +259,11 @@
       const [watchHistory, setWatchHistory] = useState([]);
       const [lastWatched, setLastWatched] = useState(null);
       
-      // Sidebar Dropdown States
       const [isAllVideosExpanded, setIsAllVideosExpanded] = useState(false);
       const [isAllPlaylistsExpanded, setIsAllPlaylistsExpanded] = useState(false);
       const [isCurrentPlaylistExpanded, setIsCurrentPlaylistExpanded] = useState(true);
       const [isHistoryExpanded, setIsHistoryExpanded] = useState(false);
       
-      // Grid Size Control State
       const [gridCols, setGridCols] = useState(4);
 
       const [playlistQueue, setPlaylistQueue] = useState([]);
@@ -378,7 +371,6 @@
           setHoveredVideo(null);
       };
 
-      // Handle Local File & Folder Uploads (with Real Thumbnail Gen & Correct Filtering)
       const handleLocalFiles = async (e, isFolder) => {
           const files = Array.from(e.target.files).filter(f => f.type.startsWith('video/'));
           if (files.length === 0) {
@@ -386,9 +378,8 @@
               return;
           }
 
-          setIsLocalModalOpen(false); // Close modal
+          setIsLocalModalOpen(false); 
           
-          // Temporary loading message
           setTimeout(() => {
               setAlertState({ isOpen: true, message: 'ফাইলগুলো প্রসেস করা হচ্ছে, দয়া করে একটু অপেক্ষা করুন...' });
           }, 100);
@@ -429,7 +420,6 @@
                   videoObjects: vidsWithThumbs
               };
               
-              // Only add PLAYLIST to videos array, not the individual videos (keeps homepage clean)
               updated = [playlist, ...videos];
           } else {
               const newVideos = [];
@@ -454,14 +444,12 @@
 
           setVideos(updated);
           
-          // Save only non-local videos to localStorage
           const storable = updated.filter(v => v.provider !== 'local');
           localStorage.setItem('ytCloneVideos', JSON.stringify(storable));
           
-          setAlertState({ isOpen: false, message: '' }); // clear processing
+          setAlertState({ isOpen: false, message: '' }); 
       };
 
-      // Main YouTube Player Initialization
       useEffect(() => {
         if (!ytReady) return;
         
@@ -473,8 +461,7 @@
             return;
         }
 
-        // Skip YouTube player for Local and GDrive videos
-        if (currentVideo.provider === 'gdrive' || currentVideo.driveId || currentVideo.provider === 'local') {
+        if (currentVideo.provider === 'gdrive' || currentVideo.driveId || currentVideo.provider === 'local' || currentVideo.provider === 'external') {
             if (playerRef.current && typeof playerRef.current.pauseVideo === 'function') {
                 playerRef.current.pauseVideo();
             }
@@ -631,27 +618,41 @@
       };
 
       const playVideo = (video) => {
-        // External Video (Google Photos) Logic - Open in Popup Window
         if (video.provider === 'external') {
-            // পপ-আপ উইন্ডোর সাইজ এবং পজিশন নির্ধারণ
-            const popupWidth = 800;
-            const popupHeight = 500;
-            const left = (window.innerWidth / 2) - (popupWidth / 2) + window.screenX;
-            const top = (window.innerHeight / 2) - (popupHeight / 2) + window.screenY;
+            setCurrentVideo(video);
+            setIsTheaterMode(true);
+            setIsMiniplayer(false);
+            setAutoPlay(true);
             
-            // নতুন ট্যাবের বদলে পপ-আপ উইন্ডো ওপেন করা
-            window.open(
-                video.externalUrl, 
-                'ExternalVideoPopup', 
-                `width=${popupWidth},height=${popupHeight},left=${left},top=${top},resizable=yes,scrollbars=yes,status=yes`
-            );
+            setTimeout(() => {
+                const sidebarWidth = isSidebarOpen ? 256 : 80;
+                const chromeWidth = window.outerWidth - window.innerWidth;
+                const chromeHeight = window.outerHeight - window.innerHeight;
+                
+                const popupWidth = window.innerWidth - sidebarWidth - 32; 
+                const popupHeight = window.innerHeight - 64 - 32; 
+                
+                const screenX = window.screenX !== undefined ? window.screenX : window.screenLeft;
+                const screenY = window.screenY !== undefined ? window.screenY : window.screenTop;
+
+                // Position calculation for overlapping the theater mode box
+                const left = screenX + (chromeWidth / 2) + sidebarWidth + 16;
+                const top = screenY + chromeHeight + 64 + 16; 
+                
+                const popup = window.open(
+                    video.externalUrl, 
+                    'ExternalVideoPopup', 
+                    `width=${popupWidth},height=${popupHeight},left=${left},top=${top},resizable=yes,scrollbars=yes,status=yes`
+                );
+                
+                if (popup) popup.focus();
+            }, 100);
             
-            // Add to history even if opened externally
             const updatedHistory = [video, ...watchHistory.filter(v => v.id !== video.id)].slice(0, 20);
             setWatchHistory(updatedHistory);
             const storableHistory = updatedHistory.filter(v => v.provider !== 'local');
             localStorage.setItem('ytCloneHistory', JSON.stringify(storableHistory));
-            return; // Stop here, don't load in main player
+            return;
         }
 
         if (currentVideo && currentVideo.id === video.id) {
@@ -670,7 +671,6 @@
         setCurrentVideo(video);
         setIsMiniplayer(false); 
         
-        // Manual logic for Local Playlist Queue
         if (video.provider === 'local' && video.type === 'local_playlist') {
             const savedIndexes = JSON.parse(localStorage.getItem('ytClonePlaylistIndexes') || '{}');
             const startIndex = savedIndexes[video.id] || 0;
@@ -679,7 +679,6 @@
             setCurrentPlaylistIndex(startIndex);
             setIsCurrentPlaylistExpanded(true);
         } else if (video.provider !== 'local') {
-            // Let YT player handle its own queue setup mostly, but clear local states
             setPlaylistQueue([]); 
             setCurrentPlaylistIndex(0);
             setIsCurrentPlaylistExpanded(true); 
@@ -688,7 +687,6 @@
         const updatedHistory = [video, ...watchHistory.filter(v => v.id !== video.id)].slice(0, 20);
         setWatchHistory(updatedHistory);
         
-        // Only save non-local videos to history to prevent broken links on reload
         const storableHistory = updatedHistory.filter(v => v.provider !== 'local');
         localStorage.setItem('ytCloneHistory', JSON.stringify(storableHistory));
         
@@ -1116,6 +1114,7 @@
                             <span className="text-sm font-bold truncate text-white">
                                 {currentVideoData?.provider === 'gdrive' && <i className="fab fa-google-drive mr-2 text-blue-400"></i>}
                                 {currentVideoData?.provider === 'local' && <i className="fas fa-hdd mr-2 text-emerald-400"></i>}
+                                {currentVideoData?.provider === 'external' && <i className="fas fa-external-link-alt mr-2 text-red-500"></i>}
                                 {currentVideoData?.type?.includes('playlist') && <i className="fas fa-play mr-2 text-gray-400 text-[10px]"></i>}
                                 {displayTitle}
                             </span>
@@ -1177,7 +1176,6 @@
                                           durations: { ...prev.durations, [vidId]: duration }
                                       }));
 
-                                      // Save strictly to local storage
                                       const storedTimes = JSON.parse(localStorage.getItem('ytCloneTimes') || '{}');
                                       const storedDurations = JSON.parse(localStorage.getItem('ytCloneDurations') || '{}');
                                       storedTimes[vidId] = time;
@@ -1186,6 +1184,31 @@
                                       localStorage.setItem('ytCloneDurations', JSON.stringify(storedDurations));
                                   }}
                               ></video>
+                          )}
+
+                          {currentVideoData?.provider === 'external' && (
+                              <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-[#121212] text-white">
+                                  <i className="fas fa-external-link-alt text-4xl text-red-500 mb-4"></i>
+                                  <h2 className="text-xl font-bold mb-2">গুগল ফটোজের ভিডিওটি পপ-আপ উইন্ডোতে চলছে</h2>
+                                  <p className="text-gray-400 text-sm mb-6 text-center px-4">ব্রাউজারের সিকিউরিটি রুলসের কারণে এটি নতুন উইন্ডোতে ওপেন হয়েছে।</p>
+                                  <div className="flex gap-4">
+                                      <button 
+                                          onClick={() => {
+                                              const popup = window.open('', 'ExternalVideoPopup');
+                                              if(popup) popup.focus();
+                                          }} 
+                                          className="bg-white/10 hover:bg-white/20 text-white px-6 py-2.5 rounded-full font-bold transition flex items-center"
+                                      >
+                                          <i className="fas fa-window-restore mr-2"></i> সামনে আনুন
+                                      </button>
+                                      <button 
+                                          onClick={() => playVideo(currentVideoData)} 
+                                          className="bg-red-600 hover:bg-red-500 text-white px-6 py-2.5 rounded-full font-bold transition flex items-center"
+                                      >
+                                          <i className="fas fa-redo mr-2"></i> আবার খুলুন
+                                      </button>
+                                  </div>
+                              </div>
                           )}
                         </div>
 
@@ -1215,6 +1238,7 @@
                     <h1 className="text-xl md:text-2xl font-bold mt-4 mb-1">
                         {currentVideoData?.provider === 'gdrive' && <span className="bg-blue-600/20 text-blue-400 text-xs px-2 py-1 rounded mr-2 align-middle border border-blue-500/30"><i className="fab fa-google-drive"></i> Google Drive</span>}
                         {currentVideoData?.provider === 'local' && <span className="bg-emerald-600/20 text-emerald-400 text-xs px-2 py-1 rounded mr-2 align-middle border border-emerald-500/30"><i className="fas fa-hdd"></i> Local File</span>}
+                        {currentVideoData?.provider === 'external' && <span className="bg-red-600/20 text-red-500 text-xs px-2 py-1 rounded mr-2 align-middle border border-red-500/30"><i className="fas fa-external-link-alt"></i> Google Photos</span>}
                         {displayTitle}
                     </h1>
                     {currentVideoData?.type?.includes('playlist') && (
